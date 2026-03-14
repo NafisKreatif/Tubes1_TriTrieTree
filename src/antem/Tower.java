@@ -23,9 +23,10 @@ public class Tower {
     }
 
     public static void buildRobot(RobotController rc) throws GameActionException {
+        if (rc.getChips() < 1500) return;
         Direction dir = RobotPlayer.directions[RobotPlayer.rng.nextInt(RobotPlayer.directions.length)];
         MapLocation nextLoc = rc.getLocation().add(dir);
-        if (robotTypeToBuild <= 3) {
+        if (robotTypeToBuild <= 2) {
             if (rc.canBuildRobot(UnitType.SOLDIER, nextLoc)) {
                 robotTypeToBuild = (robotTypeToBuild + 1) % 6;
                 rc.buildRobot(UnitType.SOLDIER, nextLoc);
