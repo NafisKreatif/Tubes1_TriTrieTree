@@ -23,22 +23,23 @@ public class Tower {
     }
 
     public static void buildRobot(RobotController rc) throws GameActionException {
-        if (rc.getChips() < 1500) return;
+        if (rc.getChips() < 1500)
+            return;
         Direction dir = RobotPlayer.directions[RobotPlayer.rng.nextInt(RobotPlayer.directions.length)];
         MapLocation nextLoc = rc.getLocation().add(dir);
-        if (robotTypeToBuild <= 2) {
+        if (robotTypeToBuild == 0) {
             if (rc.canBuildRobot(UnitType.SOLDIER, nextLoc)) {
-                robotTypeToBuild = (robotTypeToBuild + 1) % 6;
+                robotTypeToBuild = (robotTypeToBuild + 1) % 3;
                 rc.buildRobot(UnitType.SOLDIER, nextLoc);
             }
-        } else if (robotTypeToBuild <= 5) {
+        } else if (robotTypeToBuild == 1) {
             if (rc.canBuildRobot(UnitType.MOPPER, nextLoc)) {
-                robotTypeToBuild = (robotTypeToBuild + 1) % 6;
+                robotTypeToBuild = (robotTypeToBuild + 1) % 3;
                 rc.buildRobot(UnitType.MOPPER, nextLoc);
             }
         } else {
             if (rc.canBuildRobot(UnitType.SPLASHER, nextLoc)) {
-                robotTypeToBuild = (robotTypeToBuild + 1) % 6;
+                robotTypeToBuild = (robotTypeToBuild + 1) % 3;
                 rc.buildRobot(UnitType.SPLASHER, nextLoc);
             }
         }
@@ -47,9 +48,9 @@ public class Tower {
     public static void transferPaint(RobotController rc) throws GameActionException {
         // RobotInfo[] allyInfos = rc.senseNearbyRobots();
         // for (RobotInfo robotInfo : allyInfos) {
-        //     if (rc.canTransferPaint(robotInfo.getLocation(), 20)) {
-        //         rc.transferPaint(robotInfo.getLocation(), 20);
-        //     }
+        // if (rc.canTransferPaint(robotInfo.getLocation(), 20)) {
+        // rc.transferPaint(robotInfo.getLocation(), 20);
+        // }
         // }
     }
 
@@ -58,6 +59,6 @@ public class Tower {
     }
 
     public static void broadcastTargetList(RobotController rc) throws GameActionException {
-        
+
     }
 }

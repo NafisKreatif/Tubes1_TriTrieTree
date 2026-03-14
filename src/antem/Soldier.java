@@ -1,7 +1,6 @@
 package antem;
 
 import java.util.ArrayList;
-import java.util.Stack;
 
 import battlecode.common.*;
 
@@ -31,8 +30,8 @@ public class Soldier {
             if (allyInfo.getType() == UnitType.LEVEL_ONE_PAINT_TOWER
                     || allyInfo.getType() == UnitType.LEVEL_TWO_PAINT_TOWER
                     || allyInfo.getType() == UnitType.LEVEL_THREE_PAINT_TOWER) {
-                if (rc.canTransferPaint(allyInfo.getLocation(), -10)) {
-                    rc.transferPaint(allyInfo.getLocation(), -10);
+                if (rc.canTransferPaint(allyInfo.getLocation(), -20)) {
+                    rc.transferPaint(allyInfo.getLocation(), -20);
                     if (state != SoldierState.BackToPainting) {
                         knowPaintTower = true;
                         moveStack.clear();
@@ -90,7 +89,10 @@ public class Soldier {
         // Attack enemy tower
         RobotInfo[] enemyInfos = rc.senseNearbyRobots(-1, rc.getTeam().opponent());
         for (RobotInfo enemy : enemyInfos) {
-            if (rc.canAttack(enemy.getLocation())) {
+            if (rc.canAttack(enemy.getLocation())
+                    && enemy.getType() != UnitType.SOLDIER
+                    && enemy.getType() != UnitType.MOPPER
+                    && enemy.getType() != UnitType.SPLASHER) {
                 Direction dir = rc.getLocation().directionTo(enemy.getLocation());
                 rc.attack(enemy.getLocation());
                 if (rc.canMove(dir)) {
@@ -277,7 +279,7 @@ public class Soldier {
 
             if (rc.canMove(dir)) {
                 rc.move(dir);
-                goBackIndex--;
+                goBackIndex++;
             }
 
             state = SoldierState.Painting;
@@ -318,20 +320,20 @@ public class Soldier {
 
     public static boolean tryMarkResource(RobotController rc, MapLocation tileLocation) throws GameActionException {
         if (rc.canMarkResourcePattern(tileLocation)) {
-            boolean hasNoMark = true;
+            boolean shouldMark = true;
             for (int i = -2; i <= 2; i++) {
                 for (int j = -2; j <= 2; j++) {
                     if (rc.canSenseLocation(tileLocation.translate(i, j))) {
                         MapInfo tile = rc.senseMapInfo(tileLocation.translate(i, j));
-                        if (tile.getMark() != PaintType.EMPTY) {
-                            hasNoMark = false;
+                        if (tile.getMark() != PaintType.EMPTY || !tile.getPaint().isAlly()) {
+                            shouldMark = false;
                         }
                     } else {
-                        hasNoMark = false;
+                        shouldMark = false;
                     }
                 }
             }
-            if (hasNoMark) {
+            if (shouldMark) {
                 rc.markResourcePattern(tileLocation);
                 return true;
             }

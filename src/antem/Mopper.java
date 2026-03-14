@@ -27,7 +27,8 @@ public class Mopper {
             if (allyInfo.getType() == UnitType.LEVEL_ONE_PAINT_TOWER
                     || allyInfo.getType() == UnitType.LEVEL_TWO_PAINT_TOWER
                     || allyInfo.getType() == UnitType.LEVEL_THREE_PAINT_TOWER) {
-                if (rc.canTransferPaint(allyInfo.getLocation(), -10)) {
+                if (rc.canTransferPaint(allyInfo.getLocation(), -20)) {
+                    rc.canTransferPaint(allyInfo.getLocation(), -20);
                     knowPaintTower = true;
                     moveStack.clear();
                 }
@@ -45,7 +46,11 @@ public class Mopper {
         ArrayList<MapInfo> targetTiles = new ArrayList<>();
         RobotInfo[] enemyInfos = rc.senseNearbyRobots(1, rc.getTeam().opponent());
         for (RobotInfo enemy : enemyInfos) {
-            targetTiles.add(rc.senseMapInfo(enemy.getLocation()));
+            if (enemy.getType() == UnitType.SOLDIER
+                    || enemy.getType() == UnitType.MOPPER
+                    || enemy.getType() == UnitType.SPLASHER) {
+                targetTiles.add(rc.senseMapInfo(enemy.getLocation()));
+            }
         }
         MapInfo[] nearbyTiles = rc.senseNearbyMapInfos(1);
         for (MapInfo tile : nearbyTiles) {
@@ -108,7 +113,7 @@ public class Mopper {
             }
         }
 
-        if (rc.getPaint() == 100) {
+        if (rc.getPaint() > 90) {
             state = MopperState.Roaming;
         }
     }
