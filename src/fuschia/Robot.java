@@ -14,7 +14,7 @@ public abstract class Robot {
     protected final RobotController rc;
     protected final MapData mapData;
 
-    protected static final Random rng = new Random(13524095);
+    protected static Random rng = new Random(13524095);
 
     protected Robot(RobotController rc) {
         this.rc = rc;
@@ -61,6 +61,12 @@ public abstract class Robot {
         return type == UnitType.LEVEL_ONE_PAINT_TOWER
                 || type == UnitType.LEVEL_TWO_PAINT_TOWER
                 || type == UnitType.LEVEL_THREE_PAINT_TOWER;
+    }
+
+    protected static boolean isMoneyTower(UnitType type) {
+        return type == UnitType.LEVEL_ONE_MONEY_TOWER
+                || type == UnitType.LEVEL_TWO_MONEY_TOWER
+                || type == UnitType.LEVEL_THREE_MONEY_TOWER;
     }
 
     protected final boolean moveToward(MapLocation target) throws GameActionException {

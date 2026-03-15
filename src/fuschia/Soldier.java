@@ -7,6 +7,7 @@ import battlecode.common.Direction;
 import battlecode.common.GameActionException;
 import battlecode.common.MapInfo;
 import battlecode.common.MapLocation;
+import battlecode.common.Message;
 import battlecode.common.PaintType;
 import battlecode.common.RobotController;
 import battlecode.common.RobotInfo;
@@ -28,6 +29,7 @@ public class Soldier extends Unit {
 
     private RobotInfo[] nearbyRobots = new RobotInfo[0];
     private MapLocation knownPaintTower;
+    private UnitType towerToBuild;
 
     private boolean refillMode;
     private boolean returnMode;
@@ -44,10 +46,13 @@ public class Soldier extends Unit {
         for (int i = 0; i < spread; i++) {
             rng.nextInt();
         }
+        towerToBuild = UnitType.LEVEL_ONE_PAINT_TOWER;
     }
 
     @Override
     protected void determineState() throws GameActionException {
+        readMessagesFromTower();
+        
         nearbyRobots = rc.senseNearbyRobots();
         mapData.update(rc, nearbyRobots);
 
@@ -122,6 +127,7 @@ public class Soldier extends Unit {
         }
 
         rc.setIndicatorString(state.toString());
+        // rc.setIndicatorString("" + rc.getNumberTowers());
 
         if (productive) {
             markProductiveAction();
@@ -191,8 +197,7 @@ public class Soldier extends Unit {
 
         MapLocation incompleteTower = findIncompleteAllyPatternCenter();
         if (incompleteTower != null) {
-            UnitType towerType = findPatternTowerType(incompleteTower);
-            objective = Objective.tower(incompleteTower, towerType);
+            objective = Objective.tower(incompleteTower, towerToBuild);
             objectiveFromFreshMark = false;
             return;
         }
@@ -228,8 +233,8 @@ public class Soldier extends Unit {
         MapLocation objectiveCenter = objective.location;
         boolean productive = false;
         
-        if (objective.towerType != null && rc.canMarkTowerPattern(objective.towerType, objectiveCenter)) {
-            rc.markTowerPattern(objective.towerType, objectiveCenter);
+        if (rc.canMarkTowerPattern(towerToBuild, objectiveCenter)) {
+            rc.markTowerPattern(towerToBuild, objectiveCenter);
             productive = true;
         }
 
@@ -386,7 +391,7 @@ public class Soldier extends Unit {
         RobotInfo best = null;
         int bestDist = Integer.MAX_VALUE;
         for (RobotInfo robot : nearbyRobots) {
-            if (robot.team != rc.getTeam().opponent() || !isTowerType(robot.type)) {
+            if (robot.team != rc.getTeam().opponent()) {
                 continue;
             }
             int dist = rc.getLocation().distanceSquaredTo(robot.location);
@@ -418,6 +423,13 @@ public class Soldier extends Unit {
         for (MapInfo tile : rc.senseNearbyMapInfos()) {
             MapLocation loc = tile.getMapLocation();
             if (tile.hasRuin()) {
+                if (rc.canSenseRobotAtLocation(loc)) {
+                    RobotInfo robot = rc.senseRobotAtLocation(loc);
+                    if (robot != null && robot.type.isTowerType()) {
+                        continue;
+                    }
+                }
+                
                 UnitType completionType = findCompletableTowerType(loc);
                 if (completionType != null) {
                     rc.completeTowerPattern(completionType, loc);
@@ -449,9 +461,8 @@ public class Soldier extends Unit {
                 continue;
             }
 
-            UnitType towerType = chooseTowerType();
-            if (rc.canMarkTowerPattern(towerType, ruinCenter)) {
-                rc.markTowerPattern(towerType, ruinCenter);
+            if (rc.canMarkTowerPattern(towerToBuild, ruinCenter)) {
+                rc.markTowerPattern(towerToBuild, ruinCenter);
                 mapData.markRuin(ruinCenter, MapData.RUIN_TAINTED);
                 marked = true;
             }
@@ -468,6 +479,23 @@ public class Soldier extends Unit {
             }
 
             if (visible.getMark() != PaintType.EMPTY) {
+                continue;
+            }
+
+            boolean hasSRP = false;
+            for (MapInfo nearby : rc.senseNearbyMapInfos()) {
+                if (!nearby.getMapLocation().equals(at) && nearby.getMark() != PaintType.EMPTY) {
+                    MapLocation nearbyLoc = nearby.getMapLocation();
+                    if ((nearbyLoc.x % 4 == 2) && (nearbyLoc.y % 4 == 2)) {
+                        if (at.distanceSquaredTo(nearbyLoc) <= 8) {
+                            hasSRP = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if (hasSRP) {
                 continue;
             }
 
@@ -509,52 +537,20 @@ public class Soldier extends Unit {
             }
 
             if (hasAllyPatternMark(ruinCenter)) {
-                UnitType existing = findPatternTowerType(ruinCenter);
-                if (existing != null) {
-                    return new PatternPlan(ruinCenter, existing);
-                }
                 continue;
             }
 
-            UnitType towerType = chooseTowerType();
-            if (rc.canMarkTowerPattern(towerType, ruinCenter)) {
-                rc.markTowerPattern(towerType, ruinCenter);
+            if (rc.canMarkTowerPattern(towerToBuild, ruinCenter)) {
+                rc.markTowerPattern(towerToBuild, ruinCenter);
                 mapData.markRuin(ruinCenter, MapData.RUIN_TAINTED);
-                return new PatternPlan(ruinCenter, towerType);
+                return new PatternPlan(ruinCenter, towerToBuild);
             }
         }
 
         return null;
     }
 
-    private UnitType chooseTowerType() {
-        if (countKnownPaintTowers() == 0) {
-            return UnitType.LEVEL_ONE_PAINT_TOWER;
-        }
-        int choice = rng.nextInt(4);
-        if (choice == 0) {
-            return UnitType.LEVEL_ONE_DEFENSE_TOWER;
-        } else if (choice == 1) {
-            return UnitType.LEVEL_ONE_MONEY_TOWER;
-        } else {
-            return UnitType.LEVEL_ONE_PAINT_TOWER;
-        }
-    }
 
-    private UnitType findPatternTowerType(MapLocation center) throws GameActionException {
-        UnitType[] candidates = {
-            UnitType.LEVEL_ONE_PAINT_TOWER,
-            UnitType.LEVEL_ONE_MONEY_TOWER,
-            UnitType.LEVEL_ONE_DEFENSE_TOWER
-        };
-
-        for (UnitType candidate : candidates) {
-            if (rc.canMarkTowerPattern(candidate, center) || rc.canCompleteTowerPattern(candidate, center)) {
-                return candidate;
-            }
-        }
-        return null;
-    }
 
     private MapLocation findResourceObjective() throws GameActionException {
         MapLocation me = rc.getLocation();
@@ -746,6 +742,20 @@ public class Soldier extends Unit {
         objectiveFromFreshMark = false;
     }
 
+    private void readMessagesFromTower() throws GameActionException {
+        Message[] messages = rc.readMessages(-1);
+        if (messages.length > 0) {
+            int data = messages[0].getBytes();
+            if ((data & 2) == 2) {
+                towerToBuild = UnitType.LEVEL_ONE_PAINT_TOWER;
+            } else if ((data & 1) == 1) {
+                towerToBuild = UnitType.LEVEL_ONE_MONEY_TOWER;
+            } else {
+                towerToBuild = UnitType.LEVEL_ONE_DEFENSE_TOWER;
+            }
+        }
+    }
+
     private void refreshKnownPaintTower() throws GameActionException {
         MapLocation me = rc.getLocation();
         int bestDistance = Integer.MAX_VALUE;
@@ -910,16 +920,12 @@ public class Soldier extends Unit {
     }
 
     private UnitType findCompletableTowerType(MapLocation center) throws GameActionException {
-        UnitType[] candidates = {
-            UnitType.LEVEL_ONE_PAINT_TOWER,
-            UnitType.LEVEL_ONE_MONEY_TOWER,
-            UnitType.LEVEL_ONE_DEFENSE_TOWER
-        };
-
-        for (UnitType candidate : candidates) {
-            if (rc.canCompleteTowerPattern(candidate, center)) {
-                return candidate;
-            }
+        if (rc.canCompleteTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, center)) {
+            return UnitType.LEVEL_ONE_PAINT_TOWER;
+        } else if (rc.canCompleteTowerPattern(UnitType.LEVEL_ONE_MONEY_TOWER, center)) {
+            return UnitType.LEVEL_ONE_MONEY_TOWER;
+        } else if (rc.canCompleteTowerPattern(UnitType.LEVEL_ONE_DEFENSE_TOWER, center)) {
+            return UnitType.LEVEL_ONE_DEFENSE_TOWER;
         }
         return null;
     }

@@ -3,6 +3,7 @@ package fuschia;
 import battlecode.common.Direction;
 import battlecode.common.GameActionException;
 import battlecode.common.MapLocation;
+import battlecode.common.Message;
 import battlecode.common.RobotController;
 import battlecode.common.RobotInfo;
 import battlecode.common.UnitType;
@@ -11,6 +12,9 @@ public abstract class Tower extends Robot {
 
     protected int spawnCounter;
     protected boolean productiveActionTaken;
+    
+    private static int paintTowerCount = 0;
+    private static int moneyTowerCount = 0;
 
     protected Tower(RobotController rc) {
         super(rc);
@@ -20,6 +24,10 @@ public abstract class Tower extends Robot {
     public void run() throws GameActionException {
         productiveActionTaken = false;
         turnStart();
+
+        broadcastTowerType();
+        countTowerTypes();
+        tellSoldiersWhatToBuild();
 
         RobotInfo[] nearbyRobots = rc.senseNearbyRobots();
 
@@ -61,6 +69,57 @@ public abstract class Tower extends Robot {
     }
 
     protected void executeState() throws GameActionException {
+    }
+
+    private void broadcastTowerType() throws GameActionException {
+        if (rc.canBroadcastMessage()) {
+            if (isPaintTower(rc.getType())) {
+                rc.broadcastMessage(1);
+            } else if (isMoneyTower(rc.getType())) {
+                rc.broadcastMessage(2);
+            }
+        }
+    }
+
+    private void countTowerTypes() throws GameActionException {
+        Message[] messages = rc.readMessages(rc.getRoundNum() - 1);
+        paintTowerCount = 0;
+        moneyTowerCount = 0;
+        
+        for (Message message : messages) {
+            int data = message.getBytes();
+            if ((data & 1) == 1) {
+                paintTowerCount++;
+            }
+            if ((data & 2) == 2) {
+                moneyTowerCount++;
+            }
+        }
+        
+        if (isPaintTower(rc.getType())) {
+            paintTowerCount++;
+        } else if (isMoneyTower(rc.getType())) {
+            moneyTowerCount++;
+        }
+    }
+
+    private void tellSoldiersWhatToBuild() throws GameActionException {
+        int data = 0;
+        if (paintTowerCount >= moneyTowerCount) {
+            data |= 1;
+        }
+        if (moneyTowerCount >= paintTowerCount) {
+            data |= 2;
+        }
+
+        RobotInfo[] nearbyRobots = rc.senseNearbyRobots(-1, rc.getTeam());
+        for (RobotInfo robot : nearbyRobots) {
+            if (robot.type == UnitType.SOLDIER) {
+                if (rc.canSendMessage(robot.location)) {
+                    rc.sendMessage(robot.location, data);
+                }
+            }
+        }
     }
 
     protected final void markProductiveAction() {
