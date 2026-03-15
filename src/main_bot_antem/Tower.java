@@ -4,7 +4,6 @@ import battlecode.common.*;
 
 public class Tower {
     static int robotTypeToBuild = 0;
-    static int broadcastType = 0;
     static int indexTower = 0;
     static final int TARGET_EXPIRED_TIME = 50;
 
@@ -17,10 +16,6 @@ public class Tower {
         broadcastTowerType(rc);
         countTowerType(rc);
         tellToBuild(rc);
-        if (rc.getRoundNum() % 2 == 0) {
-            broadcastType++;
-            broadcastType %= 2;
-        }
         rc.setIndicatorString(paintTowerCount + ":" + moneyTowerCount);
     }
 
@@ -28,21 +23,21 @@ public class Tower {
         if (rc.getChips() < 1100)
             return;
         Direction dir = RobotPlayer.directions[RobotPlayer.rng.nextInt(RobotPlayer.directions.length)];
-        MapLocation nextLoc = rc.getLocation().add(dir);
+        MapLocation buildLocation = rc.getLocation().add(dir);
         if (robotTypeToBuild <= 1) {
-            if (rc.canBuildRobot(UnitType.SOLDIER, nextLoc)) {
+            if (rc.canBuildRobot(UnitType.SOLDIER, buildLocation)) {
                 robotTypeToBuild = (robotTypeToBuild + 1) % 4;
-                rc.buildRobot(UnitType.SOLDIER, nextLoc);
+                rc.buildRobot(UnitType.SOLDIER, buildLocation);
             }
         } else if (robotTypeToBuild <= 2) {
-            if (rc.canBuildRobot(UnitType.MOPPER, nextLoc)) {
+            if (rc.canBuildRobot(UnitType.MOPPER, buildLocation)) {
                 robotTypeToBuild = (robotTypeToBuild + 1) % 4;
-                rc.buildRobot(UnitType.MOPPER, nextLoc);
+                rc.buildRobot(UnitType.MOPPER, buildLocation);
             }
         } else {
-            if (rc.canBuildRobot(UnitType.SPLASHER, nextLoc)) {
+            if (rc.canBuildRobot(UnitType.SPLASHER, buildLocation)) {
                 robotTypeToBuild = (robotTypeToBuild + 1) % 4;
-                rc.buildRobot(UnitType.SPLASHER, nextLoc);
+                rc.buildRobot(UnitType.SPLASHER, buildLocation);
             }
         }
     }
