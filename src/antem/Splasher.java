@@ -1,6 +1,5 @@
 package antem;
 
-import java.lang.reflect.Array;
 import java.util.ArrayList;
 
 import battlecode.common.*;

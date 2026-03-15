@@ -110,7 +110,7 @@ public class Soldier {
                     }
                 }
             }
-            if (!hasEnemyPaint) {
+            if (!hasEnemyPaint && rc.getNumberTowers() < GameConstants.MAX_NUMBER_OF_TOWERS) {
                 paintLocation = ruinLocation;
                 state = SoldierState.Painting;
             }
@@ -255,7 +255,8 @@ public class Soldier {
                 moveStack.add(dir);
         }
 
-        if (tryCompleteTower(rc, paintLocation) || tryCompleteResource(rc, paintLocation)) {
+        if (tryCompleteTower(rc, paintLocation) || tryCompleteResource(rc, paintLocation)
+                || rc.getNumberTowers() == GameConstants.MAX_NUMBER_OF_TOWERS) {
             state = SoldierState.Roaming;
             paintLocation = null;
         }
