@@ -1,4 +1,4 @@
-package main_bots_antem;
+package main_bot_antem;
 
 import java.util.ArrayList;
 
