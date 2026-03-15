@@ -1,6 +1,21 @@
+# Tugas Besar 1 IF2211 Strategi Algoritma
+
+### Author
+
+Kelompok 3 - TriTrieTree
+
+- Muhammad Nafis Habibi - 13524018
+- Niko Samuel Simanjuntak - 13524029
+- Jingglang Galih Rinenggan - 13524095
+
 # Battlecode 2025 Scaffold - Java
 
-This is the Battlecode 2025 Java scaffold, containing an `examplefuncsplayer`. Read https://play.battlecode.org/bc25java/quick_start !
+This is the Battlecode 2025 Java scaffold, our bots!
+There are three main bots:
+
+1. main_bot_antem
+2. alternative_bot_1_besi2
+3. alternative_bot_2_fuchsia
 
 
 ### Project Structure
@@ -26,11 +41,6 @@ This is the Battlecode 2025 Java scaffold, containing an `examplefuncsplayer`. R
 - `gradle/`
     Contains files used by the Gradle wrapper scripts. Can be safely ignored.
 
-### How to get started
-
-You are free to directly edit `examplefuncsplayer`.
-However, we recommend you make a new bot by copying `examplefuncsplayer` to a new package under the `src` folder.
-
 ### Useful Commands
 
 - `./gradlew build`
@@ -49,5 +59,5 @@ However, we recommend you make a new bot by copying `examplefuncsplayer` to a ne
 
 Look at `gradle.properties` for project-wide configuration.
 
-If you are having any problems with the default client, please report to teh devs and
+If you are having any problems with the default client, please report to the devs and
 feel free to set the `compatibilityClient` configuration to `true` to download a different version of the client.
