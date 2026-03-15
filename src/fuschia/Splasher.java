@@ -1,6 +1,5 @@
 package fuschia;
 
-import battlecode.common.Direction;
 import battlecode.common.GameActionException;
 import battlecode.common.MapInfo;
 import battlecode.common.MapLocation;
@@ -17,11 +16,6 @@ enum SplasherState {
 public class Splasher extends Unit {
     private SplasherState state = SplasherState.EXPLORE;
 
-    private int targetX;
-    private int targetY;
-    private int targetTimer;
-    private int idleTimer;
-
     private MapLocation nearestEnemyPaint;
     private AttackChoice bestSplashChoice;
     private MapLocation exploreDestination;
@@ -29,11 +23,6 @@ public class Splasher extends Unit {
 
     public Splasher(RobotController rc) {
         super(rc);
-        MapLocation startTarget = getOppositeCorner(rc.getLocation());
-        targetX = startTarget.x;
-        targetY = startTarget.y;
-        targetTimer = 50;
-        idleTimer = 0;
     }
 
     @Override
@@ -89,49 +78,7 @@ public class Splasher extends Unit {
         // rc.setIndicatorString(state.toString() + );
     }
 
-    private void refreshTargetIfNeeded() {
-        if (targetTimer > 0) {
-            return;
-        }
-        setTarget(getOppositeCorner(rc.getLocation()));
-    }
 
-    private void setTarget(MapLocation target) {
-        if (target == null) {
-            return;
-        }
-        targetX = target.x;
-        targetY = target.y;
-        targetTimer = 50;
-    }
-
-    private MapLocation getTargetLocation() {
-        return new MapLocation(targetX, targetY);
-    }
-
-    private boolean moveToward(MapLocation target) throws GameActionException {
-        if (target == null || !rc.isMovementReady()) {
-            return false;
-        }
-
-        Direction direct = rc.getLocation().directionTo(target);
-        Direction[] prefs = {
-            direct,
-            direct.rotateLeft(),
-            direct.rotateRight(),
-            direct.rotateLeft().rotateLeft(),
-            direct.rotateRight().rotateRight(),
-            direct.opposite()
-        };
-
-        for (Direction dir : prefs) {
-            if (dir != Direction.CENTER && rc.canMove(dir)) {
-                rc.move(dir);
-                return true;
-            }
-        }
-        return false;
-    }
 
     private void doRefill() throws GameActionException {
         MapLocation nearestTower = mapData.getNearestTower(rc.getLocation());
@@ -259,27 +206,7 @@ public class Splasher extends Unit {
         return rc.canSenseLocation(loc) && rc.senseMapInfo(loc).getPaint().isEnemy();
     }
 
-    private MapLocation getOppositeCorner(MapLocation from) {
-        int maxX = rc.getMapWidth() - 1;
-        int maxY = rc.getMapHeight() - 1;
-        MapLocation[] corners = new MapLocation[] {
-            new MapLocation(0, 0),
-            new MapLocation(maxX, 0),
-            new MapLocation(0, maxY),
-            new MapLocation(maxX, maxY)
-        };
 
-        MapLocation best = corners[0];
-        int bestDist = from.distanceSquaredTo(best);
-        for (int i = 1; i < corners.length; i++) {
-            int dist = from.distanceSquaredTo(corners[i]);
-            if (dist > bestDist) {
-                bestDist = dist;
-                best = corners[i];
-            }
-        }
-        return best;
-    }
 
     private static final class AttackChoice {
         private final MapLocation location;

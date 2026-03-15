@@ -815,28 +815,6 @@ public class Soldier extends Unit {
         return false;
     }
 
-    private MapLocation getOppositeCorner(MapLocation from) {
-        int maxX = rc.getMapWidth() - 1;
-        int maxY = rc.getMapHeight() - 1;
-        MapLocation[] corners = new MapLocation[] {
-            new MapLocation(0, 0),
-            new MapLocation(maxX, 0),
-            new MapLocation(0, maxY),
-            new MapLocation(maxX, maxY)
-        };
-
-        MapLocation best = corners[0];
-        int bestDist = from.distanceSquaredTo(best);
-        for (int i = 1; i < corners.length; i++) {
-            int dist = from.distanceSquaredTo(corners[i]);
-            if (dist > bestDist) {
-                bestDist = dist;
-                best = corners[i];
-            }
-        }
-        return best;
-    }
-
     private int countKnownPaintTowers() {
         int count = 0;
         for (int i = 0; i < mapData.towerCount; i++) {
