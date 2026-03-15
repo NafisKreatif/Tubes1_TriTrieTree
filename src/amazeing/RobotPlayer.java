@@ -54,7 +54,7 @@ public class RobotPlayer {
      **/
     @SuppressWarnings("unused")
     public static void run(RobotController rc) throws GameActionException {
-        System.out.println("I'VE BEECOME SOMETHING");
+        // System.out.println("I'VE BEECOME SOMETHING");
         rc.setIndicatorString("Hacthling!");
         clockwise = rng.nextBoolean();
 
@@ -77,11 +77,11 @@ public class RobotPlayer {
                 }
             } catch (GameActionException e) {
                 // Waddat!! Wadidaidu
-                System.out.println("GameActionException: Wadidaidu?");
+                // System.out.println("GameActionException: Wadidaidu?");
                 e.printStackTrace();
 
             } catch (Exception e) {
-                System.out.println("Exception: Notme");
+                // System.out.println("Exception: Notme");
                 e.printStackTrace();
 
             } finally {
@@ -110,20 +110,20 @@ public class RobotPlayer {
         }
         // } else if (robotType <= 3 && rc.canBuildRobot(UnitType.SPLASHER, nextLoc)) {
         // // rc.buildRobot(UnitType.SPLASHER, nextLoc);
-        // System.out.println("SPANING A BEE BOOMER");
+        // //System.out.println("SPANING A BEE BOOMER");
         // }
 
         // Read incoming messages
         // Message[] messages = rc.readMessages(-1);
         // for (Message m : messages) {
-        // System.out.println("Tower received message: '#" + m.getSenderID() + " " +
+        // //System.out.println("Tower received message: '#" + m.getSenderID() + " " +
         // m.getBytes());
         // }
 
         MapLocation attackSpot = calculateBestAoESpot(rc);
         if (attackSpot != null && rc.canAttack(attackSpot)) {
             rc.attack(attackSpot);
-            System.out.println("Tower attack!!!");
+            // System.out.println("Tower attack!!!");
         }
     }
 
@@ -164,41 +164,35 @@ public class RobotPlayer {
             }
         }
 
-        Direction dir = directions[currentWalkDirection];
-        MapLocation nextLocation = rc.getLocation().add(dir);
-        if (nextLocation.x >= 0 && nextLocation.y >= 0
-                && nextLocation.x < rc.getMapWidth() && nextLocation.y < rc.getMapHeight()) {
-            MapInfo tile = rc.senseMapInfo(nextLocation);
-            if (rc.canMove(dir) && tile.getPaint().isAlly()) {
-                rc.move(dir);
-                hasMoved = true;
-            }
-        }
-
-        if (!hasMoved && rc.getMovementCooldownTurns() == 0) {
+        if (rc.isMovementReady()) {
             int reverse = clockwise ? 1 : -1;
-            for (int i = -2; i < 6; i++) {
-                Direction walkDir = directions[(currentWalkDirection + i * reverse + directions.length)
-                        % directions.length];
-                Direction checkWallDir = directions[(currentWalkDirection + (i - 1) * reverse + directions.length)
-                        % directions.length];
-                if (!isInBound(rc, rc.getLocation().add(walkDir))) {
-                    continue;
-                }
-                MapInfo walkInfo = rc.senseMapInfo(rc.getLocation().add(walkDir));
-                if (!isInBound(rc, rc.getLocation().add(checkWallDir))) {
-                        currentWalkDirection = (currentWalkDirection + i + directions.length) % directions.length;
-                        break;
-                } else {
-                    MapInfo checkWallInfo = rc.senseMapInfo(rc.getLocation().add(checkWallDir));
-                    if ((!checkWallInfo.isPassable())) {
+            if (rc.getRoundNum() % 30 > 0) {
+                for (int i = -2; i < 6; i++) {
+                    Direction walkDir = directions[(currentWalkDirection + i * reverse + directions.length)
+                            % directions.length];
+                    Direction checkWallDir = directions[(currentWalkDirection + (i - 1) * reverse + directions.length)
+                            % directions.length];
+                    if (!isInBound(rc, rc.getLocation().add(walkDir))) {
+                        continue;
+                    }
+                    if (rc.canMove(walkDir) && !rc.canMove(checkWallDir)
+                            && rc.senseRobotAtLocation(rc.getLocation().add(checkWallDir)) == null) {
                         currentWalkDirection = (currentWalkDirection + i + directions.length) % directions.length;
                         break;
                     }
                 }
+            } else {
+                clockwise = !clockwise;
+                currentWalkDirection = (currentWalkDirection + 2 * reverse + directions.length) % directions.length;
             }
-            System.out.println(directions[currentWalkDirection].name());
+            // System.out.println(directions[currentWalkDirection].name());
         }
+        Direction dir = directions[currentWalkDirection];
+        if (rc.canMove(dir)) {
+            rc.move(dir);
+            hasMoved = true;
+        }
+
         rc.setIndicatorString(directions[currentWalkDirection].name());
     }
 
