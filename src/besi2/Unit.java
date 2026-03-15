@@ -35,19 +35,46 @@ public abstract class Unit extends Robot {
 
     // Lokasi spawn tower
     protected final MapLocation spawnTowerLoc;
+    protected UnitType spawnTowerType = null;
 
     // Sudah pernah connect ke spawn tower?
     protected boolean connected = false;
 
 
-    private static final int PAINT_REFILL_THRESHOLD = 40;
     private static final int PAINT_REFILL_TARGET_PCT = 75;
 
-    private MapLocation bugNavTarget = null;
     private Direction bugWallDir = null;
     private boolean bugHuggingWall = false;
     private MapLocation bugStartLoc = null;
     private int bugStartDist = 0;
+    
+
+    protected MapLocation[] knownTowers = new MapLocation[10];
+    protected int numKnownTowers = 0;
+
+    protected void addKnownTower(MapLocation loc) {
+        for (int i = 0; i < numKnownTowers; i++) {
+            if (knownTowers[i].equals(loc)) return; 
+        }
+        if (numKnownTowers < 10) {
+            knownTowers[numKnownTowers++] = loc;
+        } else {
+            for (int i = 0; i < 9; i++) {
+                knownTowers[i] = knownTowers[i+1];
+            }
+            knownTowers[9] = loc;
+        }
+    }
+
+    protected void removeKnownTower(MapLocation loc) {
+        for (int i = 0; i < numKnownTowers; i++) {
+            if (knownTowers[i].equals(loc)) {
+                knownTowers[i] = knownTowers[numKnownTowers - 1];
+                numKnownTowers--;
+                break;
+            }
+        }
+    }
 
     //  Constructor
     public Unit(RobotController rc) throws GameActionException {
@@ -61,6 +88,7 @@ public abstract class Unit extends Robot {
                 if (d < minDist) {
                     minDist = d;
                     found = r.location;
+                    spawnTowerType = r.type;
                 }
             }
         }
@@ -104,11 +132,16 @@ public abstract class Unit extends Robot {
             }
         }
 
-        // Cek koneksi ke spawn tower
-        if (!connected && spawnTowerLoc != null
-                && rc.canSenseRobotAtLocation(spawnTowerLoc)
-                && rc.canSendMessage(spawnTowerLoc)) {
-            connected = true;
+        // Jika melihat tower sekutu yang bisa ngasih cat (Paint Tower), ingat lokasinya
+        for (RobotInfo ally : allies) {
+            if (ally.type.isTowerType() && isPaintTower(ally.type)) {
+                addKnownTower(ally.location);
+            }
+        }
+        
+        // Pastikan spawn tower (jika itu Paint Tower) selalu masuk memori di awal
+        if (spawnTowerLoc != null && spawnTowerType != null && isPaintTower(spawnTowerType)) {
+            addKnownTower(spawnTowerLoc);
         }
     }
 
@@ -140,10 +173,14 @@ public abstract class Unit extends Robot {
         if (info.hasRuin()) return false;
  
         if (info.getPaint().isEnemy() && !overwriteEnemy) return false;
+
+        if (info.getMark() == PaintType.ALLY_SECONDARY) {
+            return false;
+        }
  
         if (info.getPaint() == PaintType.EMPTY ||
                 (overwriteEnemy && info.getPaint().isEnemy())) {
-            rc.attack(loc, false); // false = primary color
+            rc.attack(loc, false);
             return true;
         }
         return false;
@@ -214,9 +251,32 @@ public abstract class Unit extends Robot {
         return closest;
     }
  
-    // Cat tile di bawah diri sendiri.
+    // Cat tile di bawah diri sendiri
     public boolean tryPaintUnderSelf() throws GameActionException {
-        return tryPaintTile(rc.getLocation());
+        if (!rc.canAttack(rc.getLocation())) return false;
+        MapInfo me = rc.senseMapInfo(rc.getLocation());
+        
+        if (me.getPaint() == PaintType.EMPTY) {
+            boolean useSecondary = false;
+            
+            if (me.getMark() == PaintType.ALLY_SECONDARY) {
+                useSecondary = true;
+            } else if (me.getMark() == PaintType.ALLY_PRIMARY) {
+                useSecondary = false;
+            } else {
+                int[] cnt = new int[] { 0, 0 };
+                for (MapInfo info : nearbyTiles) {
+                    if (info.getPaint() == PaintType.ALLY_SECONDARY) {
+                        cnt[(info.getMapLocation().x + info.getMapLocation().y) & 1]++;
+                    }
+                }
+                useSecondary = cnt[(rc.getLocation().x + rc.getLocation().y) & 1] > cnt[(1 + rc.getLocation().x + rc.getLocation().y) & 1];
+            }
+
+            rc.attack(rc.getLocation(), useSecondary);
+            return true;
+        }
+        return false;
     }
  
     // Cat tile dalam spiral keluar dari center
@@ -255,7 +315,19 @@ public abstract class Unit extends Robot {
 
     // Apakah paint cukup rendah untuk perlu refill?
     protected boolean shouldRefill() {
-        return rc.getPaint() < PAINT_REFILL_THRESHOLD;
+        int minDistSq = Integer.MAX_VALUE;
+        for (int i = 0; i < numKnownTowers; i++) {
+            int d = distTo(knownTowers[i]);
+            if (d < minDistSq) minDistSq = d;
+        }
+        
+        if (minDistSq == Integer.MAX_VALUE) return rc.getPaint() < 40;
+
+        int distStep = (int) Math.sqrt(minDistSq);
+        
+        int dynamicThreshold = Math.max(40, distStep + 20);
+        
+        return rc.getPaint() < dynamicThreshold;
     }
 
     // Apakah paint sudah cukup penuh setelah refill?
@@ -294,41 +366,57 @@ public abstract class Unit extends Robot {
      * Pergi ke paint tower terdekat yang diketahui, lalu withdraw paint.
      * Return true jika sudah di dekat tower dan berhasil refill.
      */
+    /**
+     * Smart Refill & Anti-Macet:
+     * Memilih tower yang dekat, tetapi menghindari tower yang sedang dikerumuni banyak robot sekutu.
+     */
     protected boolean goRefill() throws GameActionException {
-        // Cari paint tower terdekat dari allies yang terlihat
-        MapLocation targetTower = null;
-        int minDist = Integer.MAX_VALUE;
-        for (RobotInfo ally : allies) {
-            if (isPaintTower(ally.type)) {
-                int d = distTo(ally.location);
-                if (d < minDist) {
-                    minDist = d;
-                    targetTower = ally.location;
+        MapLocation bestLoc = null;
+        int bestScore = Integer.MAX_VALUE; 
+
+        for (int i = 0; i < numKnownTowers; i++) {
+            MapLocation loc = knownTowers[i];
+            
+            if (rc.canSenseLocation(loc)) {
+                RobotInfo r = rc.senseRobotAtLocation(loc);
+                if (r == null || r.team != rc.getTeam() || !isPaintTower(r.type)) {
+                    removeKnownTower(loc);
+                    i--;
+                    continue;
                 }
+            }
+
+            int distSq = distTo(loc);
+            int score = distSq;
+
+            // Jika towernya terlihat dari posisi sekarang, hitung keramaian di sekitarnya
+            if (rc.canSenseLocation(loc)) {
+                int crowd = rc.senseNearbyRobots(loc, 2, rc.getTeam()).length;
+                score += crowd * 50; 
+            }
+
+            if (score < bestScore) {
+                bestScore = score;
+                bestLoc = loc;
             }
         }
 
-        if (targetTower == null) {
-            targetTower = spawnTowerLoc;
-        }
-
-        if (targetTower == null) {
+        if (bestLoc == null) {
             fuzzyMove(randomDirection());
             return false;
         }
 
-        if (distTo(targetTower) <= 2) {
-            int amountToWithdraw = -(rc.getType().paintCapacity - rc.getPaint());
-            if (rc.canTransferPaint(targetTower, amountToWithdraw)) {
-                rc.transferPaint(targetTower, amountToWithdraw);
+        if (distTo(bestLoc) <= 2) {
+            int amountNeeded = rc.getType().paintCapacity - rc.getPaint();
+            if (rc.canTransferPaint(bestLoc, -amountNeeded)) {
+                rc.transferPaint(bestLoc, -amountNeeded);
             }
-            
-            if (refillComplete()) {
-                return true; 
-            }
+            if (refillComplete()) return true;
         } else {
-            bugNav(targetTower);
+            bugNav(bestLoc);
+            rc.setIndicatorLine(rc.getLocation(), bestLoc, 0, 255, 255);
         }
+        
         return false;
     }
 
@@ -395,10 +483,27 @@ public abstract class Unit extends Robot {
         fuzzyMove(dir);
     }
 
-    // Coba gerak masuk ke dalam radius tertentu dari target.
+    //Coba gerak masuk ke dalam radius tertentu dari target.
     protected void moveIntoRange(MapLocation target, int radiusSq) throws GameActionException {
         if (!rc.isMovementReady()) return;
         if (distTo(target) <= radiusSq) return;
         bugNav(target);
+    }
+
+    /**
+     * Memastikan area splash bebas dari marker secondary sekutu
+     * agar Splasher tidak merusak SRP yang sedang dibangun.
+     */
+    protected boolean isSafeToSplash(MapLocation target) throws GameActionException {
+        MapLocation[] affectedLocs = rc.getAllLocationsWithinRadiusSquared(target, 4);
+        for (MapLocation loc : affectedLocs) {
+            if (rc.canSenseLocation(loc)) {
+                MapInfo info = rc.senseMapInfo(loc);
+                if (info.getMark() == PaintType.ALLY_SECONDARY) {
+                    return false; 
+                }
+            }
+        }
+        return true;
     }
 }

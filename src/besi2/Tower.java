@@ -30,11 +30,6 @@ public abstract class Tower extends Robot {
         enemyDirection = rc.getLocation().directionTo(center).opposite();
 
         spawnTiles = rc.getAllLocationsWithinRadiusSquared(rc.getLocation(), GameConstants.BUILD_ROBOT_RADIUS_SQUARED);
-
-        // Broadcast posisi tower di awal agar robot lain tahu
-        if (rc.getRoundNum() == spawnTurn && rc.canBroadcastMessage()) {
-            rc.broadcastMessage(encodeLocation(rc.getLocation()));
-        }
     }
 
     // Turn tower
@@ -44,20 +39,10 @@ public abstract class Tower extends Robot {
         RobotInfo[] alliedRobots = rc.senseNearbyRobots(-1, rc.getTeam());
         RobotInfo[] enemyRobots = rc.senseNearbyRobots(-1, rc.getTeam().opponent());
 
-        broadcastTowerLocation();
         handleUpgrade(alliedRobots);
         handleEmergencyMopper(enemyRobots, alliedRobots);
         handleSpawning(alliedRobots);
         handleAttack(enemyRobots);
-    }
-
-    // Komunikasi
-
-    // Broadcast posisi tower di round pertama agar robot tahu
-    private void broadcastTowerLocation() throws GameActionException {
-        if (rc.getRoundNum() == spawnTurn && rc.canBroadcastMessage()) {
-            rc.broadcastMessage(encodeLocation(rc.getLocation()));
-        }
     }
 
     // Upgrade
@@ -76,7 +61,7 @@ public abstract class Tower extends Robot {
         int upgradeCost = isLv1 ? 2500 : 5000;
         int chipsThreshold = upgradeCost + 500;  
         int richThreshold = upgradeCost + 1500; 
-
+        //  di sini                 johjijhih
         // if (isPaintTower(currentType)) {
         //     // Paint tower
             if (chips > chipsThreshold && (nearbyAllies >= 3 || chips > richThreshold)) {
@@ -124,7 +109,6 @@ public abstract class Tower extends Robot {
      *   Mid-late game: 1 Soldier → 1 Mopper → 1 Splasher → ulang
      */
     protected void handleSpawning(RobotInfo[] allies) throws GameActionException {
-        // Hanya paint tower dan starting tower yang spawn aktif
         boolean shouldSpawn = isPaintTower(rc.getType()) || isStartingTower;
         if (!shouldSpawn) {
             // Spawn Soldier jika ada banyak chips

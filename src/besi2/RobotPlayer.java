@@ -1,7 +1,6 @@
 package besi2;
 
 import battlecode.common.*;
-
 import besi2.Towers.DefenseTower;
 import besi2.Towers.MoneyTower;
 import besi2.Towers.PaintTower;

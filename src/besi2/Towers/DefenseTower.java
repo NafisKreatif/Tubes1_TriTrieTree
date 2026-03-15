@@ -1,7 +1,7 @@
 package besi2.Towers;
 
-import besi2.Tower;
 import battlecode.common.*;
+import besi2.Tower;
 
 public class DefenseTower extends Tower {
     public DefenseTower(RobotController rc) throws GameActionException {
