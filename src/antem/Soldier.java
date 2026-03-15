@@ -9,7 +9,7 @@ public class Soldier {
         Roaming,
         Painting,
         Refill,
-        BackToPainting
+        BackToFront
     }
 
     public static ArrayList<Direction> moveStack = new ArrayList<>();
@@ -26,9 +26,6 @@ public class Soldier {
 
     public static void run(RobotController rc) throws GameActionException {
         indicatorString = state.name() + "\n" + towerToBuild.name();
-        if (paintTowerLocation == null) {
-            paintTowerLocation = rc.getLocation();
-        }
         readMessagesFromTower(rc);
         switch (state) {
             case Roaming:
@@ -38,22 +35,25 @@ public class Soldier {
                 paint(rc);
                 break;
             case Refill:
-                goBack(rc);
+                refill(rc);
                 break;
-            case BackToPainting:
-                goPaint(rc);
+            case BackToFront:
+                goBackToFront(rc);
                 break;
 
             default:
                 break;
         }
-        RobotInfo[] allyInfos = rc.senseNearbyRobots(2, rc.getTeam());
+        RobotInfo[] allyInfos = rc.senseNearbyRobots(3, rc.getTeam());
         for (RobotInfo allyInfo : allyInfos) {
             if (allyInfo.getType() == UnitType.LEVEL_ONE_PAINT_TOWER
                     || allyInfo.getType() == UnitType.LEVEL_TWO_PAINT_TOWER
                     || allyInfo.getType() == UnitType.LEVEL_THREE_PAINT_TOWER) {
-                if (state != SoldierState.BackToPainting
-                        && state != SoldierState.Refill) {
+                if (state != SoldierState.BackToFront
+                        && state != SoldierState.Refill
+                        && !rc.senseMapInfo(
+                                rc.getLocation().add(rc.getLocation().directionTo(allyInfo.getLocation())))
+                                .isWall()) {
                     paintTowerLocation = allyInfo.getLocation();
                     moveStack.clear();
                 }
@@ -110,7 +110,10 @@ public class Soldier {
                     }
                 }
             }
-            if (!hasEnemyPaint && rc.getNumberTowers() < GameConstants.MAX_NUMBER_OF_TOWERS) {
+            Direction dir = rc.getLocation().directionTo(ruinLocation);
+            if (!hasEnemyPaint
+                    && !rc.senseMapInfo(rc.getLocation().add(dir)).isWall()
+                    && rc.getNumberTowers() < GameConstants.MAX_NUMBER_OF_TOWERS) {
                 paintLocation = ruinLocation;
                 state = SoldierState.Painting;
             }
@@ -140,11 +143,11 @@ public class Soldier {
         for (MapInfo tile : nearbyTiles) {
             boolean hasTower = false;
             if (rc.canSenseRobotAtLocation(tile.getMapLocation())) {
-                if (rc.senseRobotAtLocation(tile.getMapLocation()).getType().isTowerType()) {
+                if (rc.senseRobotAtLocation(tile.getMapLocation()).getType().isTowerType() || tile.hasRuin()) {
                     hasTower = true;
                 }
             }
-            if (!hasTower && tile.getPaint() == PaintType.EMPTY
+            if (!hasTower && tile.getPaint() == PaintType.EMPTY && !tile.isWall()
                     || (tile.getMark() != tile.getPaint()
                             && tile.getMark().isAlly()
                             && tile.getPaint().isAlly())) {
@@ -176,9 +179,11 @@ public class Soldier {
             Direction dir = rc.getLocation().directionTo(targetTile.getMapLocation());
             boolean useSecondaryColor = targetTile.getMark() == PaintType.ALLY_SECONDARY;
             if (rc.canAttack(targetTile.getMapLocation())) {
+                indicatorString += "\nTargetting : " + targetTile.getMapLocation().toString();
                 isAttacking = true;
                 rc.attack(targetTile.getMapLocation(), useSecondaryColor);
                 if (rc.canMove(dir)) {
+                    indicatorString += "\nMoving to : " + targetTile.getMapLocation().toString();
                     rc.move(dir);
                     moveDirection = dir;
                     if (paintTowerLocation != null)
@@ -189,6 +194,7 @@ public class Soldier {
             MapInfo potentialTile = potentialTiles.get(RobotPlayer.rng.nextInt(potentialTiles.size()));
             Direction dir = rc.getLocation().directionTo(potentialTile.getMapLocation());
             if (rc.canMove(dir)) {
+                indicatorString += "\nMoving to : " + potentialTile.getMapLocation().toString();
                 rc.move(dir);
                 moveDirection = dir;
                 if (paintTowerLocation != null)
@@ -198,18 +204,19 @@ public class Soldier {
 
         // Move straight or do a random direction
         if (rc.canMove(moveDirection)) {
+            indicatorString += "\nMoving to direction : " + moveDirection.name();
             rc.move(moveDirection);
             if (paintTowerLocation != null)
                 moveStack.add(moveDirection);
         } else {
             if (rc.isMovementReady() && !isAttacking && rc.isActionReady()) {
-                indicatorString += "[New Direction]";
+                indicatorString += "\nNew Direction : " + moveDirection.name();
                 moveDirection = getNewDirection(rc, moveDirection);
             }
         }
 
         // Refill time
-        if (rc.getPaint() < 20 && paintTowerLocation != null) {
+        if (rc.getPaint() < 30 && paintTowerLocation != null) {
             state = SoldierState.Refill;
             goBackIndex = moveStack.size() - 1;
         }
@@ -253,6 +260,8 @@ public class Soldier {
             moveDirection = dir;
             if (paintTowerLocation != null)
                 moveStack.add(dir);
+        } else if (rc.senseMapInfo(rc.getLocation().add(dir)).isWall()) {
+            state = SoldierState.Roaming;
         }
 
         if (tryCompleteTower(rc, paintLocation) || tryCompleteResource(rc, paintLocation)
@@ -262,7 +271,7 @@ public class Soldier {
         }
 
         // Refill time
-        if (rc.getPaint() < 20 && !patternCompleted) {
+        if (rc.getPaint() < 30 && !patternCompleted) {
             if (paintTowerLocation != null) {
                 state = SoldierState.Refill;
                 goBackIndex = moveStack.size() - 1;
@@ -272,7 +281,7 @@ public class Soldier {
         }
     }
 
-    public static void goBack(RobotController rc) throws GameActionException {
+    public static void refill(RobotController rc) throws GameActionException {
         indicatorString += paintTowerLocation.toString();
         MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
 
@@ -288,14 +297,15 @@ public class Soldier {
             }
         }
 
-        if (rc.canSenseLocation(paintTowerLocation)) {
+        if (rc.canSenseLocation(paintTowerLocation)
+                && !rc.senseMapInfo(rc.getLocation().add(rc.getLocation().directionTo(paintTowerLocation))).isWall()) {
             indicatorString += ">> I see the tower";
-            moveStack.clear();
             Direction dir = rc.getLocation().directionTo(paintTowerLocation);
             if (rc.canMove(dir)) {
                 rc.move(dir);
+                moveStack.add(goBackIndex + 1, IndexToDirection((DirectionToIndex(dir) + 4) % 8));
             }
-        } else if (goBackIndex > 0) {
+        } else if (goBackIndex >= 0) {
             Direction dir = moveStack.get(goBackIndex);
             Direction opposite = rc.getLocation().directionTo(rc.getLocation().subtract(dir));
 
@@ -306,16 +316,12 @@ public class Soldier {
         }
 
         if (rc.getPaint() > 150) {
-            if (paintLocation == null) {
-                state = SoldierState.Roaming;
-                moveStack.clear();
-            } else {
-                state = SoldierState.BackToPainting;
-            }
+            goBackIndex++;
+            state = SoldierState.BackToFront;
         }
     }
 
-    public static void goPaint(RobotController rc) throws GameActionException {
+    public static void goBackToFront(RobotController rc) throws GameActionException {
         MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
 
         // Check for ruin and resource pattern
@@ -330,12 +336,12 @@ public class Soldier {
             }
         }
 
-        if (rc.canSenseLocation(paintLocation)) {
+        if (paintLocation != null && rc.canSenseLocation(paintLocation)) {
             while (moveStack.size() - 1 > goBackIndex) {
                 moveStack.removeLast();
             }
             state = SoldierState.Painting;
-        } else if (goBackIndex < moveStack.size() - 1) {
+        } else if (goBackIndex < moveStack.size()) {
             Direction dir = moveStack.get(goBackIndex);
 
             if (rc.canMove(dir)) {
@@ -488,9 +494,10 @@ public class Soldier {
         } else {
             p = new int[] { 2, 1, 3, 4 };
         }
+        int reverse = RobotPlayer.rng.nextBoolean() ? 1 : -1;
         for (int i = 0; i <= 3; i++) {
             for (int j = -1; j <= 1; j += 2) {
-                Direction newDirection = IndexToDirection(DirectionToIndex(initialDirection) + p[i] * j);
+                Direction newDirection = IndexToDirection(DirectionToIndex(initialDirection) + p[i] * j * reverse);
                 if (rc.canMove(newDirection)) {
                     return newDirection;
                 }

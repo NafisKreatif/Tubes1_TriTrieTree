@@ -21,26 +21,26 @@ public class Mopper {
 
     public static void run(RobotController rc) throws GameActionException {
         indicatorString = state.name();
-        if (paintTowerLocation == null) {
-            paintTowerLocation = rc.getLocation();
-        }
         switch (state) {
             case Roaming:
                 roam(rc);
                 break;
             case Refill:
-                goBack(rc);
+                refill(rc);
                 break;
 
             default:
                 break;
         }
-        RobotInfo[] allyInfos = rc.senseNearbyRobots(1, rc.getTeam());
+        RobotInfo[] allyInfos = rc.senseNearbyRobots(3, rc.getTeam());
         for (RobotInfo allyInfo : allyInfos) {
             if (allyInfo.getType() == UnitType.LEVEL_ONE_PAINT_TOWER
                     || allyInfo.getType() == UnitType.LEVEL_TWO_PAINT_TOWER
                     || allyInfo.getType() == UnitType.LEVEL_THREE_PAINT_TOWER) {
-                if (state != MopperState.Refill) {
+                if (state != MopperState.Refill
+                        && !rc.senseMapInfo(
+                                rc.getLocation().add(rc.getLocation().directionTo(allyInfo.getLocation())))
+                                .isWall()) {
                     paintTowerLocation = allyInfo.getLocation();
                     moveStack.clear();
                 }
@@ -163,9 +163,10 @@ public class Mopper {
         }
     }
 
-    public static void goBack(RobotController rc) throws GameActionException {
+    public static void refill(RobotController rc) throws GameActionException {
         indicatorString += paintTowerLocation.toString();
-        if (rc.canSenseLocation(paintTowerLocation)) {
+        if (rc.canSenseLocation(paintTowerLocation)
+                && !rc.senseMapInfo(rc.getLocation().add(rc.getLocation().directionTo(paintTowerLocation))).isWall()) {
             indicatorString += ">> I see the tower";
             moveStack.clear();
             Direction dir = rc.getLocation().directionTo(paintTowerLocation);
@@ -337,9 +338,10 @@ public class Mopper {
         } else {
             p = new int[] { 2, 1, 3, 4 };
         }
+        int reverse = RobotPlayer.rng.nextBoolean() ? 1 : -1;
         for (int i = 0; i <= 3; i++) {
             for (int j = -1; j <= 1; j += 2) {
-                Direction newDirection = IndexToDirection(DirectionToIndex(initialDirection) + p[i] * j);
+                Direction newDirection = IndexToDirection(DirectionToIndex(initialDirection) + p[i] * j * reverse);
                 if (rc.canMove(newDirection)) {
                     return newDirection;
                 }

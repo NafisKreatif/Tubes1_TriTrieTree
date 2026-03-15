@@ -17,34 +17,36 @@ public class Splasher {
 
     public static SplasherState state = SplasherState.Roaming;
 
-    public static MapLocation paintLocation = null;
+    public static MapLocation lastLocation = null;
     public static MapLocation paintTowerLocation = null;
 
     public static String indicatorString = "";
 
     public static void run(RobotController rc) throws GameActionException {
         indicatorString = state.name();
-        if (paintTowerLocation == null) {
-            paintTowerLocation = rc.getLocation();
-        }
         switch (state) {
             case Roaming:
                 roam(rc);
                 break;
             case Refill:
-                goBack(rc);
+                refill(rc);
+                break;
+            case BackToFront:
+                goBackToFront(rc);
                 break;
 
             default:
                 break;
         }
-        RobotInfo[] allyInfos = rc.senseNearbyRobots(2, rc.getTeam());
+        RobotInfo[] allyInfos = rc.senseNearbyRobots(3, rc.getTeam());
         for (RobotInfo allyInfo : allyInfos) {
             if (allyInfo.getType() == UnitType.LEVEL_ONE_PAINT_TOWER
                     || allyInfo.getType() == UnitType.LEVEL_TWO_PAINT_TOWER
                     || allyInfo.getType() == UnitType.LEVEL_THREE_PAINT_TOWER) {
                 if (state != SplasherState.Refill
-                        && state != SplasherState.BackToFront) {
+                        && state != SplasherState.BackToFront
+                        && !rc.senseMapInfo(rc.getLocation().add(rc.getLocation().directionTo(allyInfo.getLocation())))
+                                .isWall()) {
                     paintTowerLocation = allyInfo.getLocation();
                     moveStack.clear();
                 }
@@ -91,14 +93,14 @@ public class Splasher {
                 }
             }
         }
-        
+
         // Mark resource
         for (int i = -1; i <= 1; i++) {
             for (int j = -1; j <= 1; j++) {
                 tryMarkResource(rc, rc.getLocation().translate(i, j));
             }
         }
-        
+
         // Attack tile randomly
         ArrayList<MapInfo> targetTiles = new ArrayList<>();
         for (MapInfo tile : nearbyTiles) {
@@ -132,7 +134,6 @@ public class Splasher {
             }
         }
 
-
         // Move straight or do a random direction
         if (rc.canMove(moveDirection)) {
             rc.move(moveDirection);
@@ -152,7 +153,7 @@ public class Splasher {
         }
     }
 
-    public static void goBack(RobotController rc) throws GameActionException {
+    public static void refill(RobotController rc) throws GameActionException {
         indicatorString += paintTowerLocation.toString();
         MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
 
@@ -168,14 +169,15 @@ public class Splasher {
             }
         }
 
-        if (rc.canSenseLocation(paintTowerLocation)) {
+        if (rc.canSenseLocation(paintTowerLocation)
+                && !rc.senseMapInfo(rc.getLocation().add(rc.getLocation().directionTo(paintTowerLocation))).isWall()) {
             indicatorString += ">> I see the tower";
-            moveStack.clear();
             Direction dir = rc.getLocation().directionTo(paintTowerLocation);
             if (rc.canMove(dir)) {
                 rc.move(dir);
+                moveStack.add(goBackIndex + 1, IndexToDirection((DirectionToIndex(dir) + 4) % 8));
             }
-        } else if (goBackIndex > 0) {
+        } else if (goBackIndex >= 0) {
             Direction dir = moveStack.get(goBackIndex);
             Direction opposite = rc.getLocation().directionTo(rc.getLocation().subtract(dir));
 
@@ -186,12 +188,45 @@ public class Splasher {
         }
 
         if (rc.getPaint() > 200) {
-            if (paintLocation == null) {
-                state = SplasherState.Roaming;
-                moveStack.clear();
-            } else {
-                state = SplasherState.BackToFront;
+            goBackIndex++;
+            state = SplasherState.BackToFront;
+        }
+    }
+
+    public static void goBackToFront(RobotController rc) throws GameActionException {
+        MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
+
+        // Check for ruin and resource pattern
+        for (MapInfo tile : nearbyTiles) {
+            if (tile.hasRuin()) {
+                tryCompleteTower(rc, tile.getMapLocation());
             }
+            if (tile.getMark() != PaintType.EMPTY) {
+                if (rc.canCompleteResourcePattern(tile.getMapLocation())) {
+                    rc.completeResourcePattern(tile.getMapLocation());
+                }
+            }
+        }
+
+        if (goBackIndex < moveStack.size()) {
+            Direction dir = moveStack.get(goBackIndex);
+
+            if (rc.canMove(dir)) {
+                rc.move(dir);
+                goBackIndex++;
+            }
+
+            // Refill time
+            if (rc.getPaint() < 70) {
+                if (paintTowerLocation != null) {
+                    state = SplasherState.Refill;
+                    goBackIndex = moveStack.size() - 1;
+                } else {
+                    state = SplasherState.Roaming;
+                }
+            }
+        } else {
+            state = SplasherState.Roaming;
         }
     }
 
@@ -330,9 +365,10 @@ public class Splasher {
         } else {
             p = new int[] { 2, 1, 3, 4 };
         }
+        int reverse = RobotPlayer.rng.nextBoolean() ? 1 : -1;
         for (int i = 0; i <= 3; i++) {
             for (int j = -1; j <= 1; j += 2) {
-                Direction newDirection = IndexToDirection(DirectionToIndex(initialDirection) + p[i] * j);
+                Direction newDirection = IndexToDirection(DirectionToIndex(initialDirection) + p[i] * j * reverse);
                 if (rc.canMove(newDirection)) {
                     return newDirection;
                 }
