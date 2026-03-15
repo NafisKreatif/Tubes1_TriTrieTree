@@ -248,6 +248,12 @@ public class Mopper extends Unit {
 
     private MapLocation findNearestEnemyPaint() {
         MapLocation me = rc.getLocation();
+        
+        MapLocation markedTarget = findNearestEnemyMarkedTile();
+        if (markedTarget != null) {
+            return markedTarget;
+        }
+        
         MapLocation best = null;
         int bestDistance = Integer.MAX_VALUE;
 
@@ -257,6 +263,34 @@ public class Mopper extends Unit {
             }
 
             int distance = me.distanceSquaredTo(tile.getMapLocation());
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = tile.getMapLocation();
+            }
+        }
+
+        return best;
+    }
+
+    private MapLocation findNearestEnemyMarkedTile() {
+        MapLocation me = rc.getLocation();
+        MapLocation best = null;
+        int bestDistance = Integer.MAX_VALUE;
+
+        for (MapInfo tile : nearbyTiles) {
+            if (!tile.getMark().isEnemy()) {
+                continue;
+            }
+            
+            if (tile.hasRuin()) {
+                continue;
+            }
+
+            int distance = me.distanceSquaredTo(tile.getMapLocation());
+            if (distance > 30) {
+                continue;
+            }
+            
             if (distance < bestDistance) {
                 bestDistance = distance;
                 best = tile.getMapLocation();

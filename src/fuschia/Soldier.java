@@ -12,8 +12,8 @@ import battlecode.common.RobotController;
 import battlecode.common.RobotInfo;
 import battlecode.common.UnitType;
 
-
 public class Soldier extends Unit {
+
     enum SoldierState {
         REFILL,
         COMBAT,
@@ -39,7 +39,11 @@ public class Soldier extends Unit {
 
     public Soldier(RobotController rc) {
         super(rc);
-        moveDirection = Direction.values()[rng.nextInt(8)];
+        int spread = (rc.getLocation().x * 73 + rc.getLocation().y * 97 + rc.getRoundNum() * 31) & 7;
+        moveDirection = Direction.values()[spread];
+        for (int i = 0; i < spread; i++) {
+            rng.nextInt();
+        }
     }
 
     @Override
@@ -49,7 +53,7 @@ public class Soldier extends Unit {
 
         refreshKnownPaintTower();
 
-        if (!refillMode && rc.getPaint() < 40 && knownPaintTower != null) {
+        if (!refillMode && rc.getPaint() < 60 && knownPaintTower != null) {
             refillMode = true;
             returnMode = false;
             returnIndex = moveHistory.size() - 1;
@@ -89,6 +93,14 @@ public class Soldier extends Unit {
 
         boolean productive = false;
         if (tryCompleteNearbyPatterns()) {
+            productive = true;
+        }
+
+        if (tryMarkNewTowers()) {
+            productive = true;
+        }
+
+        if (tryMarkNewSRPs()) {
             productive = true;
         }
 
@@ -170,18 +182,18 @@ public class Soldier extends Unit {
     }
 
     private void selectObjective() throws GameActionException {
+        PatternPlan plan = findAndMarkNewRuinPattern();
+        if (plan != null) {
+            objective = Objective.tower(plan.location, plan.towerType);
+            objectiveFromFreshMark = true;
+            return;
+        }
+
         MapLocation incompleteTower = findIncompleteAllyPatternCenter();
         if (incompleteTower != null) {
             UnitType towerType = findPatternTowerType(incompleteTower);
             objective = Objective.tower(incompleteTower, towerType);
             objectiveFromFreshMark = false;
-            return;
-        }
-
-        PatternPlan plan = findAndMarkNewRuinPattern();
-        if (plan != null) {
-            objective = Objective.tower(plan.location, plan.towerType);
-            objectiveFromFreshMark = true;
             return;
         }
 
@@ -205,7 +217,7 @@ public class Soldier extends Unit {
             return false;
         }
 
-        if (rc.getPaint() < 40) {
+        if (rc.getPaint() < 60) {
             refillMode = true;
             returnMode = false;
             returnIndex = moveHistory.size() - 1;
@@ -215,6 +227,7 @@ public class Soldier extends Unit {
         state = objectiveFromFreshMark ? SoldierState.TAINT : SoldierState.TOWER_BUILD;
         MapLocation objectiveCenter = objective.location;
         boolean productive = false;
+        
         if (objective.towerType != null && rc.canMarkTowerPattern(objective.towerType, objectiveCenter)) {
             rc.markTowerPattern(objective.towerType, objectiveCenter);
             productive = true;
@@ -222,6 +235,11 @@ public class Soldier extends Unit {
 
         MapInfo[] patternTiles = rc.senseNearbyMapInfos(objectiveCenter, 8);
         MapLocation unpainted = findNearestUnpaintedPatternTile(objectiveCenter, patternTiles);
+        
+        if (unpainted == null && patternTiles.length > 0) {
+            unpainted = findNearestEmptyTile(objectiveCenter, patternTiles);
+        }
+        
         if (unpainted != null) {
             if (!tryPaintTile(unpainted)) {
                 productive |= moveToward(unpainted, true);
@@ -284,27 +302,81 @@ public class Soldier extends Unit {
     private boolean roamAndPaint() throws GameActionException {
         boolean productive = false;
 
-        MapLocation paintTarget = findBestPaintTarget();
-        if (paintTarget != null && tryPaintTile(paintTarget)) {
-            productive = true;
-            Direction attackDir = rc.getLocation().directionTo(paintTarget);
-            if (attackDir != Direction.CENTER) {
-                moveIfPossible(attackDir, true);
+        boolean shouldPaint;
+        if (objective == null) {
+            shouldPaint = rc.getPaint() > 200;
+        } else {
+            int distToObjective = rc.getLocation().distanceSquaredTo(objective.location);
+            shouldPaint = (distToObjective > 13 && rc.getPaint() > 100) || 
+                          (distToObjective <= 13 && rc.getPaint() > 120);
+        }
+        
+        if (shouldPaint) {
+            MapLocation paintTarget = findBestPaintTarget();
+            if (paintTarget != null && tryPaintTile(paintTarget)) {
+                productive = true;
+                Direction attackDir = rc.getLocation().directionTo(paintTarget);
+                if (attackDir != Direction.CENTER) {
+                    moveIfPossible(attackDir, true);
+                }
             }
         }
 
-        MapLocation chaseTarget = findNearestEnemyPaintTile();
-        if (chaseTarget == null) {
-            chaseTarget = getOppositeCorner(rc.getLocation());
+        MapLocation chaseTarget = null;
+        if (rng.nextInt(3) < 2) {
+            MapLocation nearest = findNearestEnemyPaintTile();
+            if (nearest != null && rc.getLocation().distanceSquaredTo(nearest) <= 20) {
+                chaseTarget = nearest;
+            }
         }
 
-        if (rc.isMovementReady() && chaseTarget != null) {
+        if (chaseTarget != null) {
             productive |= moveToward(chaseTarget, true);
-        }
-
-        if (rc.isMovementReady() && !moveIfPossible(moveDirection, true)) {
-            Direction alt = Direction.values()[rng.nextInt(8)];
-            moveIfPossible(alt, true);
+        } else if (objective == null) {
+            MapLocation ruinTarget = findNearestUnclaimedRuin();
+            if (ruinTarget != null && moveToward(ruinTarget, true)) {
+                productive = true;
+            } else if (rc.isMovementReady()) {
+                if (moveIfPossible(moveDirection, true)) {
+                    productive = true;
+                } else {
+                    boolean moved = false;
+                    for (int rot = 1; rot <= 3 && !moved; rot++) {
+                        for (int flip = -1; flip <= 1; flip += 2) {
+                            Direction adj = Direction.values()[(moveDirection.ordinal() + rot * flip + 8) % 8];
+                            if (moveIfPossible(adj, true)) {
+                                moveDirection = adj;
+                                productive = true;
+                                moved = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (rc.isMovementReady() && rng.nextInt(10) == 0) {
+                        moveDirection = Direction.values()[rng.nextInt(8)];
+                    }
+                }
+            }
+        } else if (rc.isMovementReady()) {
+            if (moveIfPossible(moveDirection, true)) {
+                productive = true;
+            } else {
+                boolean moved = false;
+                for (int rot = 1; rot <= 3 && !moved; rot++) {
+                    for (int flip = -1; flip <= 1; flip += 2) {
+                        Direction adj = Direction.values()[(moveDirection.ordinal() + rot * flip + 8) % 8];
+                        if (moveIfPossible(adj, true)) {
+                            moveDirection = adj;
+                            productive = true;
+                            moved = true;
+                            break;
+                        }
+                    }
+                }
+                if (rc.isMovementReady() && rng.nextInt(10) == 0) {
+                    moveDirection = Direction.values()[rng.nextInt(8)];
+                }
+            }
         }
 
         return productive;
@@ -359,6 +431,70 @@ public class Soldier extends Unit {
             }
         }
         return completed;
+    }
+
+    private boolean tryMarkNewTowers() throws GameActionException {
+        boolean marked = false;
+        for (MapInfo visible : rc.senseNearbyMapInfos()) {
+            if (!visible.hasRuin()) {
+                continue;
+            }
+
+            MapLocation ruinCenter = visible.getMapLocation();
+            if (!isRuinUnclaimed(ruinCenter)) {
+                continue;
+            }
+
+            if (hasAllyPatternMark(ruinCenter)) {
+                continue;
+            }
+
+            UnitType towerType = chooseTowerType();
+            if (rc.canMarkTowerPattern(towerType, ruinCenter)) {
+                rc.markTowerPattern(towerType, ruinCenter);
+                mapData.markRuin(ruinCenter, MapData.RUIN_TAINTED);
+                marked = true;
+            }
+        }
+        return marked;
+    }
+
+    private boolean tryMarkNewSRPs() throws GameActionException {
+        boolean marked = false;
+        for (MapInfo visible : rc.senseNearbyMapInfos()) {
+            MapLocation at = visible.getMapLocation();
+            if ((at.x % 4 != 2) || (at.y % 4 != 2)) {
+                continue;
+            }
+
+            if (visible.getMark() != PaintType.EMPTY) {
+                continue;
+            }
+
+            boolean valid = true;
+            for (int i = -2; i <= 2; i++) {
+                for (int j = -2; j <= 2; j++) {
+                    MapLocation check = at.translate(i, j);
+                    if (rc.canSenseLocation(check)) {
+                        MapInfo tile = rc.senseMapInfo(check);
+                        if (tile.isWall() || tile.hasRuin() || !tile.getPaint().isAlly()) {
+                            valid = false;
+                            break;
+                        }
+                    } else {
+                        valid = false;
+                        break;
+                    }
+                }
+                if (!valid) break;
+            }
+
+            if (valid && rc.canMarkResourcePattern(at)) {
+                rc.markResourcePattern(at);
+                marked = true;
+            }
+        }
+        return marked;
     }
 
     private PatternPlan findAndMarkNewRuinPattern() throws GameActionException {
@@ -429,7 +565,7 @@ public class Soldier extends Unit {
         for (MapInfo tile : rc.senseNearbyMapInfos(1)) {
             MapLocation candidate = tile.getMapLocation();
             if (isValidSrpCenter(candidate)
-                && (shouldMarkResourcePattern(candidate) || hasIncompleteResourcePattern(candidate))) {
+                    && (shouldMarkResourcePattern(candidate) || hasIncompleteResourcePattern(candidate))) {
                 return candidate;
             }
         }
@@ -459,8 +595,8 @@ public class Soldier extends Unit {
             }
 
             if (mark == PaintType.ALLY_PRIMARY || mark == PaintType.ALLY_SECONDARY) {
-                boolean paintedCorrectly =
-                    (mark == PaintType.ALLY_PRIMARY && paint == PaintType.ALLY_PRIMARY)
+                boolean paintedCorrectly
+                        = (mark == PaintType.ALLY_PRIMARY && paint == PaintType.ALLY_PRIMARY)
                         || (mark == PaintType.ALLY_SECONDARY && paint == PaintType.ALLY_SECONDARY);
                 if (!paintedCorrectly) {
                     score += 15;
@@ -492,6 +628,31 @@ public class Soldier extends Unit {
             if (distance < bestDistance) {
                 bestDistance = distance;
                 best = tile.getMapLocation();
+            }
+        }
+
+        return best;
+    }
+
+    private MapLocation findNearestUnclaimedRuin() throws GameActionException {
+        MapLocation me = rc.getLocation();
+        MapLocation best = null;
+        int bestDistance = Integer.MAX_VALUE;
+
+        for (MapInfo tile : rc.senseNearbyMapInfos()) {
+            if (!tile.hasRuin()) {
+                continue;
+            }
+
+            MapLocation ruinLoc = tile.getMapLocation();
+            if (!isRuinUnclaimed(ruinLoc) || hasAllyPatternMark(ruinLoc)) {
+                continue;
+            }
+
+            int distance = me.distanceSquaredTo(ruinLoc);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = ruinLoc;
             }
         }
 
@@ -565,7 +726,7 @@ public class Soldier extends Unit {
                 return false;
             }
             return findIncompleteResourcePatternTile(objective.location, rc.senseNearbyMapInfos(objective.location, 8)) == null
-                && !rc.canCompleteResourcePattern(objective.location);
+                    && !rc.canCompleteResourcePattern(objective.location);
         }
 
         if (!rc.canSenseLocation(objective.location)) {
@@ -638,8 +799,8 @@ public class Soldier extends Unit {
 
                 hasAllyMark = true;
                 PaintType paint = tile.getPaint();
-                boolean paintedCorrectly =
-                    (mark == PaintType.ALLY_PRIMARY && paint == PaintType.ALLY_PRIMARY)
+                boolean paintedCorrectly
+                        = (mark == PaintType.ALLY_PRIMARY && paint == PaintType.ALLY_PRIMARY)
                         || (mark == PaintType.ALLY_SECONDARY && paint == PaintType.ALLY_SECONDARY);
                 if (!paintedCorrectly) {
                     hasIncompleteMarkedTile = true;
@@ -661,7 +822,7 @@ public class Soldier extends Unit {
 
         for (MapInfo tile : nearbyTiles) {
             MapLocation loc = tile.getMapLocation();
-            if (loc.distanceSquaredTo(center) > 4 || tile.isWall() || tile.hasRuin()) {
+            if (loc.distanceSquaredTo(center) > 8 || tile.isWall() || tile.hasRuin()) {
                 continue;
             }
 
@@ -671,11 +832,37 @@ public class Soldier extends Unit {
             }
 
             PaintType paint = tile.getPaint();
-            boolean paintedCorrectly =
-                (mark == PaintType.ALLY_PRIMARY && paint == PaintType.ALLY_PRIMARY)
+            boolean paintedCorrectly
+                    = (mark == PaintType.ALLY_PRIMARY && paint == PaintType.ALLY_PRIMARY)
                     || (mark == PaintType.ALLY_SECONDARY && paint == PaintType.ALLY_SECONDARY);
             if (paintedCorrectly) {
                 continue;
+            }
+
+            int dist = me.distanceSquaredTo(loc);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = loc;
+            }
+        }
+
+        return best;
+    }
+
+    private MapLocation findNearestEmptyTile(MapLocation center, MapInfo[] nearbyTiles) {
+        MapLocation me = rc.getLocation();
+        MapLocation best = null;
+        int bestDist = Integer.MAX_VALUE;
+
+        for (MapInfo tile : nearbyTiles) {
+            MapLocation loc = tile.getMapLocation();
+            if (loc.distanceSquaredTo(center) > 8 || tile.isWall() || tile.hasRuin()) {
+                continue;
+            }
+
+            PaintType paint = tile.getPaint();
+            if (paint == PaintType.ALLY_PRIMARY || paint == PaintType.ALLY_SECONDARY) {
+                continue; 
             }
 
             int dist = me.distanceSquaredTo(loc);
@@ -705,8 +892,8 @@ public class Soldier extends Unit {
             }
 
             PaintType paint = tile.getPaint();
-            boolean paintedCorrectly =
-                (mark == PaintType.ALLY_PRIMARY && paint == PaintType.ALLY_PRIMARY)
+            boolean paintedCorrectly
+                    = (mark == PaintType.ALLY_PRIMARY && paint == PaintType.ALLY_PRIMARY)
                     || (mark == PaintType.ALLY_SECONDARY && paint == PaintType.ALLY_SECONDARY);
             if (paintedCorrectly) {
                 continue;
@@ -801,8 +988,8 @@ public class Soldier extends Unit {
             }
 
             PaintType paint = tile.getPaint();
-            boolean paintedCorrectly =
-                (mark == PaintType.ALLY_PRIMARY && paint == PaintType.ALLY_PRIMARY)
+            boolean paintedCorrectly
+                    = (mark == PaintType.ALLY_PRIMARY && paint == PaintType.ALLY_PRIMARY)
                     || (mark == PaintType.ALLY_SECONDARY && paint == PaintType.ALLY_SECONDARY);
             if (!paintedCorrectly) {
                 return loc;
@@ -832,6 +1019,7 @@ public class Soldier extends Unit {
     }
 
     private static final class PatternPlan {
+
         private final MapLocation location;
         private final UnitType towerType;
 
@@ -842,6 +1030,7 @@ public class Soldier extends Unit {
     }
 
     private static final class Objective {
+
         private final MapLocation location;
         private final boolean isResource;
         private final UnitType towerType;

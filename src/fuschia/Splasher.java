@@ -1,5 +1,6 @@
 package fuschia;
 
+import battlecode.common.Direction;
 import battlecode.common.GameActionException;
 import battlecode.common.MapInfo;
 import battlecode.common.MapLocation;
@@ -15,14 +16,19 @@ enum SplasherState {
 
 public class Splasher extends Unit {
     private SplasherState state = SplasherState.EXPLORE;
+    private Direction moveDirection;
 
     private MapLocation nearestEnemyPaint;
     private AttackChoice bestSplashChoice;
-    private MapLocation exploreDestination;
     private boolean splashActionReadyBranch;
 
     public Splasher(RobotController rc) {
         super(rc);
+        moveDirection = Direction.values()[rng.nextInt(8)];
+        int seed = rc.getLocation().x * 31 + rc.getLocation().y;
+        for (int i = 0; i < (seed & 7); i++) {
+            rng.nextInt();
+        }
     }
 
     @Override
@@ -30,11 +36,8 @@ public class Splasher extends Unit {
         RobotInfo[] nearbyRobots = rc.senseNearbyRobots();
         mapData.update(rc, nearbyRobots);
 
-        refreshTargetIfNeeded();
-
         nearestEnemyPaint = findNearestEnemyPaint(rc.senseNearbyMapInfos());
         bestSplashChoice = null;
-        exploreDestination = null;
         splashActionReadyBranch = false;
 
         if (rc.getPaint() < 50) {
@@ -59,11 +62,6 @@ public class Splasher extends Unit {
         }
 
         state = SplasherState.EXPLORE;
-        if (rc.getRoundNum() < 200) {
-            exploreDestination = new MapLocation(rc.getMapWidth() / 2, rc.getMapHeight() / 2);
-        } else {
-            exploreDestination = getTargetLocation();
-        }
     }
 
     @Override
@@ -131,14 +129,37 @@ public class Splasher extends Unit {
     }
 
     private void doExplore() throws GameActionException {
-        if (moveToward(exploreDestination)) {
+        MapLocation exploreTarget = null;
+        if (rc.getRoundNum() < 200) {
+            exploreTarget = new MapLocation(rc.getMapWidth() / 2, rc.getMapHeight() / 2);
+        }
+
+        if (exploreTarget != null && moveToward(exploreTarget)) {
             markProductiveAction();
+        } else if (rc.isMovementReady()) {
+            if (rc.canMove(moveDirection)) {
+                rc.move(moveDirection);
+                markProductiveAction();
+            } else {
+                boolean moved = false;
+                for (int rot = 1; rot <= 3 && !moved; rot++) {
+                    for (int flip = -1; flip <= 1; flip += 2) {
+                        Direction adj = Direction.values()[(moveDirection.ordinal() + rot * flip + 8) % 8];
+                        if (rc.canMove(adj)) {
+                            rc.move(adj);
+                            moveDirection = adj;
+                            markProductiveAction();
+                            moved = true;
+                            break;
+                        }
+                    }
+                }
+                if (rc.isMovementReady() && rng.nextInt(10) == 0) {
+                    moveDirection = Direction.values()[rng.nextInt(8)];
+                }
+            }
         }
         idleTimer += 1;
-        if (idleTimer >= 12) {
-            setTarget(getOppositeCorner(rc.getLocation()));
-            idleTimer = 0;
-        }
     }
 
     private MapLocation findNearestEnemyPaint(MapInfo[] nearbyTiles) {
