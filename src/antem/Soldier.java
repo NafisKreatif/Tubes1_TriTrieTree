@@ -143,14 +143,12 @@ public class Soldier {
         for (MapInfo tile : nearbyTiles) {
             boolean hasTower = false;
             if (rc.canSenseRobotAtLocation(tile.getMapLocation())) {
-                if (rc.senseRobotAtLocation(tile.getMapLocation()).getType().isTowerType() || tile.hasRuin()) {
+                if (rc.senseRobotAtLocation(tile.getMapLocation()).getType().isTowerType()) {
                     hasTower = true;
                 }
             }
-            if (!hasTower && tile.getPaint() == PaintType.EMPTY && !tile.isWall()
-                    || (tile.getMark() != tile.getPaint()
-                            && tile.getMark().isAlly()
-                            && tile.getPaint().isAlly())) {
+            if (!tile.hasRuin() && !hasTower && tile.getPaint() == PaintType.EMPTY && !tile.isWall()
+                    || (tile.getMark() != tile.getPaint() && tile.getMark().isAlly() && tile.getPaint().isAlly())) {
                 if (rc.canAttack(tile.getMapLocation())) {
                     targetTiles.add(tile);
                 } else {
