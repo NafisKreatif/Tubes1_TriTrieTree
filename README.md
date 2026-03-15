@@ -17,6 +17,21 @@ There are three main bots:
 2. alternative_bot_1_besi2
 3. alternative_bot_2_fuchsia
 
+## Deskripsi Program
+Repositori ini berisi implementasi agen cerdas (bot) untuk permainan **Battlecode 2025: Chromatic Conflict** menggunakan pendekatan **Algoritma Greedy**. Karena adanya batasan visibilitas (*vision radius*) dan batasan komputasi (*bytecode limit* per giliran), bot dirancang untuk menyelesaikan sub-masalah secara *greedy* lokal, seperti navigasi pergerakan, penentuan target serangan, dan manajemen sumber daya (cat dan *chips*).
+
+Terdapat tiga variasi bot yang dikembangkan:
+1. **Bot Utama (Antem):** Memprioritaskan penguasaan wilayah secara agresif dan reaktif (*early-game domination*). Sangat ringan secara komputasi dan berhasil membuktikan laju kemenangan (*win rate*) tertinggi selama tahap pengujian.
+2. **Bot Alternatif 1 (Besi2):** Mengandalkan navigasi rintangan dengan kombinasi *BugNav* dan *FuzzyMove* dengan rotasi prioritas *seed* ID serta evaluasi penargetan serang berbasis *lowest HP*.
+3. **Bot Alternatif 2 (Fuschia):** Menerapkan manajemen investasi *tower* yang *risk-averse* (sangat hati-hati menahan sumber daya) dan pembobotan *greedy* dinamis (*weighted score*) pada evaluasi serangannya.
+
+## Requirement Program
+Untuk melakukan kompilasi dan menjalankan simulasi bot pada repositori ini, diperlukan beberapa hal berikut:
+* **Java Development Kit (JDK) 21** atau versi yang lebih baru (Sesuai ketentuan Battlecode 2025).
+* Koneksi internet aktif saat menjalankan simulasi pertama kali (untuk mengunduh *dependencies* Gradle).
+* **Battlecode 2025 Client** (Opsional, untuk memutar dan memvisualisasikan file *replay* `.bc25`).
+This is the Battlecode 2025 Java scaffold, containing an `examplefuncsplayer`. Read https://play.battlecode.org/bc25java/quick_start
+
 
 ### Project Structure
 
