@@ -69,6 +69,15 @@ public class Mopper {
                 }
             }
         }
+        MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
+        for (MapInfo tile : nearbyTiles) {
+            if (tile.hasRuin()) {
+                tryCompleteTower(rc, tile.getMapLocation());
+            }
+            if (tile.getMark() != PaintType.EMPTY) {
+                tryCompleteResource(rc, tile.getMapLocation());
+            }
+        }
         rc.setIndicatorString(indicatorString);
     }
 
@@ -98,14 +107,6 @@ public class Mopper {
                     targetTiles.add(tile);
                 } else {
                     potentialTiles.add(tile);
-                }
-            }
-            if (tile.hasRuin()) {
-                tryCompleteTower(rc, tile.getMapLocation());
-            }
-            if (tile.getMark() != PaintType.EMPTY) {
-                if (rc.canCompleteResourcePattern(tile.getMapLocation())) {
-                    rc.completeResourcePattern(tile.getMapLocation());
                 }
             }
         }

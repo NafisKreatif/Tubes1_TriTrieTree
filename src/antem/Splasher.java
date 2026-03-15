@@ -70,6 +70,15 @@ public class Splasher {
                 }
             }
         }
+        MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
+        for (MapInfo tile : nearbyTiles) {
+            if (tile.hasRuin()) {
+                tryCompleteTower(rc, tile.getMapLocation());
+            }
+            if (tile.getMark() != PaintType.EMPTY) {
+                tryCompleteResource(rc, tile.getMapLocation());
+            }
+        }
         rc.setIndicatorString(indicatorString);
     }
 
@@ -107,14 +116,6 @@ public class Splasher {
             if (tile.getPaint() == PaintType.EMPTY
                     || (tile.getMark() != tile.getPaint() && tile.getMark().isAlly() && tile.getPaint().isAlly())) {
                 targetTiles.add(tile);
-            }
-            if (tile.hasRuin()) {
-                tryCompleteTower(rc, tile.getMapLocation());
-            }
-            if (tile.getMark() != PaintType.EMPTY) {
-                if (rc.canCompleteResourcePattern(tile.getMapLocation())) {
-                    rc.completeResourcePattern(tile.getMapLocation());
-                }
             }
         }
 
@@ -155,19 +156,6 @@ public class Splasher {
 
     public static void refill(RobotController rc) throws GameActionException {
         indicatorString += paintTowerLocation.toString();
-        MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
-
-        // Check for ruin and resource pattern
-        for (MapInfo tile : nearbyTiles) {
-            if (tile.hasRuin()) {
-                tryCompleteTower(rc, tile.getMapLocation());
-            }
-            if (tile.getMark() != PaintType.EMPTY) {
-                if (rc.canCompleteResourcePattern(tile.getMapLocation())) {
-                    rc.completeResourcePattern(tile.getMapLocation());
-                }
-            }
-        }
 
         if (rc.canSenseLocation(paintTowerLocation)
                 && !rc.senseMapInfo(rc.getLocation().add(rc.getLocation().directionTo(paintTowerLocation))).isWall()) {
@@ -194,20 +182,6 @@ public class Splasher {
     }
 
     public static void goBackToFront(RobotController rc) throws GameActionException {
-        MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
-
-        // Check for ruin and resource pattern
-        for (MapInfo tile : nearbyTiles) {
-            if (tile.hasRuin()) {
-                tryCompleteTower(rc, tile.getMapLocation());
-            }
-            if (tile.getMark() != PaintType.EMPTY) {
-                if (rc.canCompleteResourcePattern(tile.getMapLocation())) {
-                    rc.completeResourcePattern(tile.getMapLocation());
-                }
-            }
-        }
-
         if (goBackIndex < moveStack.size()) {
             Direction dir = moveStack.get(goBackIndex);
 

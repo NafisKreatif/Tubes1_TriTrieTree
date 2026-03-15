@@ -77,23 +77,26 @@ public class Soldier {
                 }
             }
         }
+        MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
+        for (MapInfo tile : nearbyTiles) {
+            if (tile.hasRuin()) {
+                tryCompleteTower(rc, tile.getMapLocation());
+            }
+            if (tile.getMark() != PaintType.EMPTY) {
+                tryCompleteResource(rc, tile.getMapLocation());
+            }
+        }
         rc.setIndicatorString(indicatorString);
     }
 
     public static void roam(RobotController rc) throws GameActionException {
         MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
 
-        // Check for ruin and resource pattern
+        // Check for ruin
         MapInfo ruinTile = null;
         for (MapInfo tile : nearbyTiles) {
             if (tile.hasRuin()) {
                 ruinTile = tile;
-                tryCompleteTower(rc, tile.getMapLocation());
-            }
-            if (tile.getMark() != PaintType.EMPTY) {
-                if (rc.canCompleteResourcePattern(tile.getMapLocation())) {
-                    rc.completeResourcePattern(tile.getMapLocation());
-                }
             }
         }
         if (ruinTile != null && rc.senseRobotAtLocation(ruinTile.getMapLocation()) == null) {
@@ -281,20 +284,6 @@ public class Soldier {
 
     public static void refill(RobotController rc) throws GameActionException {
         indicatorString += paintTowerLocation.toString();
-        MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
-
-        // Check for ruin and resource pattern
-        for (MapInfo tile : nearbyTiles) {
-            if (tile.hasRuin()) {
-                tryCompleteTower(rc, tile.getMapLocation());
-            }
-            if (tile.getMark() != PaintType.EMPTY) {
-                if (rc.canCompleteResourcePattern(tile.getMapLocation())) {
-                    rc.completeResourcePattern(tile.getMapLocation());
-                }
-            }
-        }
-
         if (rc.canSenseLocation(paintTowerLocation)
                 && !rc.senseMapInfo(rc.getLocation().add(rc.getLocation().directionTo(paintTowerLocation))).isWall()) {
             indicatorString += ">> I see the tower";
@@ -320,20 +309,6 @@ public class Soldier {
     }
 
     public static void goBackToFront(RobotController rc) throws GameActionException {
-        MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
-
-        // Check for ruin and resource pattern
-        for (MapInfo tile : nearbyTiles) {
-            if (tile.hasRuin()) {
-                tryCompleteTower(rc, tile.getMapLocation());
-            }
-            if (tile.getMark() != PaintType.EMPTY) {
-                if (rc.canCompleteResourcePattern(tile.getMapLocation())) {
-                    rc.completeResourcePattern(tile.getMapLocation());
-                }
-            }
-        }
-
         if (paintLocation != null && rc.canSenseLocation(paintLocation)) {
             while (moveStack.size() - 1 > goBackIndex) {
                 moveStack.removeLast();
