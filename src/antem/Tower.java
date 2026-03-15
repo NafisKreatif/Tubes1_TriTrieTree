@@ -55,6 +55,7 @@ public class Tower {
                 rc.attack(randomEnemy.getLocation());
             }
         }
+        rc.attack(null); // AoE
     }
 
     public static void broadcastTowerType(RobotController rc) throws GameActionException {
