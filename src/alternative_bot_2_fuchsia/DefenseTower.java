@@ -1,10 +1,10 @@
-package alternative_bot_2_fuschia;
+package alternative_bot_2_fuchsia;
 
 import battlecode.common.GameActionException;
 import battlecode.common.RobotController;
 
-public class MoneyTower extends Tower {
-    public MoneyTower(RobotController rc) {
+public class DefenseTower extends Tower {
+    public DefenseTower(RobotController rc) {
         super(rc);
     }
 

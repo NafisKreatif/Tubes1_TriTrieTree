@@ -1,4 +1,4 @@
-package alternative_bot_2_fuschia;
+package alternative_bot_2_fuchsia;
 
 import battlecode.common.Direction;
 import battlecode.common.GameActionException;

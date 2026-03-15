@@ -1,4 +1,4 @@
-package alternative_bot_2_fuschia;
+package alternative_bot_2_fuchsia;
 
 import battlecode.common.Clock;
 import battlecode.common.GameActionException;
