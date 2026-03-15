@@ -10,11 +10,16 @@ public class Soldier {
         Painting,
         Refill,
         BackToPainting
+        Refill,
+        BackToPainting
     }
 
     public static ArrayList<Direction> moveStack = new ArrayList<>();
     public static int goBackIndex = -1;
+    public static ArrayList<Direction> moveStack = new ArrayList<>();
+    public static int goBackIndex = -1;
     public static Direction moveDirection = IndexToDirection(RobotPlayer.rng.nextInt(8));
+
 
     public static SoldierState state = SoldierState.Roaming;
 
@@ -24,7 +29,18 @@ public class Soldier {
 
     public static String indicatorString = "";
 
+    public static MapLocation paintLocation = null;
+    public static MapLocation paintTowerLocation = null;
+    public static UnitType towerToBuild = UnitType.LEVEL_ONE_PAINT_TOWER;
+
+    public static String indicatorString = "";
+
     public static void run(RobotController rc) throws GameActionException {
+        indicatorString = state.name() + "\n" + towerToBuild.name();
+        if (paintTowerLocation == null) {
+            paintTowerLocation = rc.getLocation();
+        }
+        readMessagesFromTower(rc);
         indicatorString = state.name() + "\n" + towerToBuild.name();
         if (paintTowerLocation == null) {
             paintTowerLocation = rc.getLocation();
@@ -43,10 +59,44 @@ public class Soldier {
             case BackToPainting:
                 goPaint(rc);
                 break;
+            case BackToPainting:
+                goPaint(rc);
+                break;
 
             default:
                 break;
         }
+        RobotInfo[] allyInfos = rc.senseNearbyRobots(2, rc.getTeam());
+        for (RobotInfo allyInfo : allyInfos) {
+            if (allyInfo.getType() == UnitType.LEVEL_ONE_PAINT_TOWER
+                    || allyInfo.getType() == UnitType.LEVEL_TWO_PAINT_TOWER
+                    || allyInfo.getType() == UnitType.LEVEL_THREE_PAINT_TOWER) {
+                if (state != SoldierState.BackToPainting
+                        && state != SoldierState.Refill) {
+                    paintTowerLocation = allyInfo.getLocation();
+                    moveStack.clear();
+                }
+                if (rc.canTransferPaint(allyInfo.getLocation(), -50)) {
+                    rc.transferPaint(allyInfo.getLocation(), -50);
+                }
+            }
+            if (rc.canUpgradeTower(allyInfo.getLocation())) {
+                if (allyInfo.type == UnitType.LEVEL_ONE_PAINT_TOWER
+                        || allyInfo.type == UnitType.LEVEL_ONE_MONEY_TOWER
+                        || allyInfo.type == UnitType.LEVEL_ONE_DEFENSE_TOWER) {
+                    if (rc.getChips() > 5000) {
+                        rc.upgradeTower(allyInfo.getLocation());
+                    }
+                } else if (allyInfo.type == UnitType.LEVEL_TWO_PAINT_TOWER
+                        || allyInfo.type == UnitType.LEVEL_TWO_MONEY_TOWER
+                        || allyInfo.type == UnitType.LEVEL_TWO_DEFENSE_TOWER) {
+                    if (rc.getChips() > 7500) {
+                        rc.upgradeTower(allyInfo.getLocation());
+                    }
+                }
+            }
+        }
+        rc.setIndicatorString(indicatorString);
         RobotInfo[] allyInfos = rc.senseNearbyRobots(2, rc.getTeam());
         for (RobotInfo allyInfo : allyInfos) {
             if (allyInfo.getType() == UnitType.LEVEL_ONE_PAINT_TOWER
@@ -89,6 +139,7 @@ public class Soldier {
             if (tile.hasRuin()) {
                 ruinTile = tile;
                 tryCompleteTower(rc, tile.getMapLocation());
+                tryCompleteTower(rc, tile.getMapLocation());
             }
             if (tile.getMark() != PaintType.EMPTY) {
                 if (rc.canCompleteResourcePattern(tile.getMapLocation())) {
@@ -96,6 +147,7 @@ public class Soldier {
                 }
             }
         }
+        if (ruinTile != null && rc.senseRobotAtLocation(ruinTile.getMapLocation()) == null) {
         if (ruinTile != null && rc.senseRobotAtLocation(ruinTile.getMapLocation()) == null) {
             MapLocation ruinLocation = ruinTile.getMapLocation();
             tryMarkTower(rc, ruinLocation);
@@ -123,11 +175,16 @@ public class Soldier {
                     && enemy.getType() != UnitType.SOLDIER
                     && enemy.getType() != UnitType.MOPPER
                     && enemy.getType() != UnitType.SPLASHER) {
+            if (rc.canAttack(enemy.getLocation())
+                    && enemy.getType() != UnitType.SOLDIER
+                    && enemy.getType() != UnitType.MOPPER
+                    && enemy.getType() != UnitType.SPLASHER) {
                 Direction dir = rc.getLocation().directionTo(enemy.getLocation());
                 rc.attack(enemy.getLocation());
                 if (rc.canMove(dir)) {
                     rc.move(dir);
                     moveDirection = dir;
+                    if (paintTowerLocation != null)
                     if (paintTowerLocation != null)
                         moveStack.add(dir);
                 }
@@ -137,7 +194,23 @@ public class Soldier {
         // Attack tile randomly
         ArrayList<MapInfo> targetTiles = new ArrayList<>();
         ArrayList<MapInfo> potentialTiles = new ArrayList<>();
+        ArrayList<MapInfo> potentialTiles = new ArrayList<>();
         for (MapInfo tile : nearbyTiles) {
+            boolean hasTower = false;
+            if (rc.canSenseRobotAtLocation(tile.getMapLocation())) {
+                if (rc.senseRobotAtLocation(tile.getMapLocation()).getType().isTowerType()) {
+                    hasTower = true;
+                }
+            }
+            if (!hasTower && tile.getPaint() == PaintType.EMPTY
+                    || (tile.getMark() != tile.getPaint()
+                            && tile.getMark().isAlly()
+                            && tile.getPaint().isAlly())) {
+                if (rc.canAttack(tile.getMapLocation())) {
+                    targetTiles.add(tile);
+                } else {
+                    potentialTiles.add(tile);
+                }
             boolean hasTower = false;
             if (rc.canSenseRobotAtLocation(tile.getMapLocation())) {
                 if (rc.senseRobotAtLocation(tile.getMapLocation()).getType().isTowerType()) {
@@ -171,19 +244,46 @@ public class Soldier {
         }
 
         boolean isAttacking = false;
+
+        // Mark resource
+        if (tryMarkResource(rc, rc.getLocation())) {
+            paintLocation = rc.getLocation();
+            state = SoldierState.Painting;
+        } else {
+            nearbyTiles = rc.senseNearbyMapInfos(1);
+            for (MapInfo tile : nearbyTiles) {
+                if (tryMarkResource(rc, tile.getMapLocation())) {
+                    paintLocation = tile.getMapLocation();
+                    state = SoldierState.Painting;
+                }
+            }
+        }
+
+        boolean isAttacking = false;
         if (!targetTiles.isEmpty()) {
             MapInfo targetTile = targetTiles.get(RobotPlayer.rng.nextInt(targetTiles.size()));
             Direction dir = rc.getLocation().directionTo(targetTile.getMapLocation());
             boolean useSecondaryColor = targetTile.getMark() == PaintType.ALLY_SECONDARY;
             if (rc.canAttack(targetTile.getMapLocation())) {
                 isAttacking = true;
+                isAttacking = true;
                 rc.attack(targetTile.getMapLocation(), useSecondaryColor);
                 if (rc.canMove(dir)) {
                     rc.move(dir);
                     moveDirection = dir;
                     if (paintTowerLocation != null)
+                    if (paintTowerLocation != null)
                         moveStack.add(dir);
                 }
+            }
+        } else if (!potentialTiles.isEmpty()) {
+            MapInfo potentialTile = potentialTiles.get(RobotPlayer.rng.nextInt(potentialTiles.size()));
+            Direction dir = rc.getLocation().directionTo(potentialTile.getMapLocation());
+            if (rc.canMove(dir)) {
+                rc.move(dir);
+                moveDirection = dir;
+                if (paintTowerLocation != null)
+                    moveStack.add(dir);
             }
         } else if (!potentialTiles.isEmpty()) {
             MapInfo potentialTile = potentialTiles.get(RobotPlayer.rng.nextInt(potentialTiles.size()));
@@ -200,8 +300,12 @@ public class Soldier {
         if (rc.canMove(moveDirection)) {
             rc.move(moveDirection);
             if (paintTowerLocation != null)
+            if (paintTowerLocation != null)
                 moveStack.add(moveDirection);
         } else {
+            if (rc.isMovementReady() && !isAttacking && rc.isActionReady()) {
+                indicatorString += "[New Direction]";
+                moveDirection = getNewDirection(rc, moveDirection);
             if (rc.isMovementReady() && !isAttacking && rc.isActionReady()) {
                 indicatorString += "[New Direction]";
                 moveDirection = getNewDirection(rc, moveDirection);
@@ -210,12 +314,16 @@ public class Soldier {
 
         // Refill time
         if (rc.getPaint() < 20 && paintTowerLocation != null) {
+        if (rc.getPaint() < 20 && paintTowerLocation != null) {
             state = SoldierState.Refill;
+            goBackIndex = moveStack.size() - 1;
             goBackIndex = moveStack.size() - 1;
         }
     }
 
     public static void paint(RobotController rc) throws GameActionException {
+        indicatorString += paintLocation.toString();
+        tryMarkTower(rc, paintLocation);
         indicatorString += paintLocation.toString();
         tryMarkTower(rc, paintLocation);
         boolean patternCompleted = true;
@@ -239,18 +347,42 @@ public class Soldier {
                             if (paintTowerLocation != null)
                                 moveStack.add(dir);
                         }
+        for (int i = -2; i <= 2; i++) {
+            for (int j = -2; j <= 2; j++) {
+                if (rc.canSenseLocation(paintLocation.translate(i, j))) {
+                    MapInfo patternTile = rc.senseMapInfo(paintLocation.translate(i, j));
+                    if (patternTile.getPaint().isEnemy()) {
+                        state = SoldierState.Roaming;
+                    } else if (patternTile.getMark() != patternTile.getPaint()
+                            && patternTile.getMark() != PaintType.EMPTY) {
+                        patternCompleted = false;
+                        boolean useSecondaryColor = patternTile.getMark() == PaintType.ALLY_SECONDARY;
+                        if (rc.canAttack(patternTile.getMapLocation())) {
+                            rc.attack(patternTile.getMapLocation(), useSecondaryColor);
+                        }
+                        Direction dir = rc.getLocation().directionTo(patternTile.getMapLocation());
+                        if (rc.canMove(dir)) {
+                            rc.move(dir);
+                            moveDirection = dir;
+                            if (paintTowerLocation != null)
+                                moveStack.add(dir);
+                        }
                     }
+                } else {
+                    patternCompleted = false;
                 } else {
                     patternCompleted = false;
                 }
             }
         }
 
+
         // Go to paintLocation, takutnya malah kabur
         Direction dir = rc.getLocation().directionTo(paintLocation);
         if (rc.canMove(dir)) {
             rc.move(dir);
             moveDirection = dir;
+            if (paintTowerLocation != null)
             if (paintTowerLocation != null)
                 moveStack.add(dir);
         }
@@ -269,10 +401,45 @@ public class Soldier {
             } else {
                 state = SoldierState.Roaming;
             }
+            paintLocation = null;
+        }
+
+        // Refill time
+        if (rc.getPaint() < 20 && !patternCompleted) {
+            if (paintTowerLocation != null) {
+                state = SoldierState.Refill;
+                goBackIndex = moveStack.size() - 1;
+            } else {
+                state = SoldierState.Roaming;
+            }
         }
     }
 
     public static void goBack(RobotController rc) throws GameActionException {
+        indicatorString += paintTowerLocation.toString();
+        MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
+
+        // Check for ruin and resource pattern
+        for (MapInfo tile : nearbyTiles) {
+            if (tile.hasRuin()) {
+                tryCompleteTower(rc, tile.getMapLocation());
+            }
+            if (tile.getMark() != PaintType.EMPTY) {
+                if (rc.canCompleteResourcePattern(tile.getMapLocation())) {
+                    rc.completeResourcePattern(tile.getMapLocation());
+                }
+            }
+        }
+
+        if (rc.canSenseLocation(paintTowerLocation)) {
+            indicatorString += ">> I see the tower";
+            moveStack.clear();
+            Direction dir = rc.getLocation().directionTo(paintTowerLocation);
+            if (rc.canMove(dir)) {
+                rc.move(dir);
+            }
+        } else if (goBackIndex > 0) {
+            Direction dir = moveStack.get(goBackIndex);
         indicatorString += paintTowerLocation.toString();
         MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
 
@@ -353,10 +520,65 @@ public class Soldier {
                 }
             }
         } else {
+                goBackIndex--;
+            }
+        }
+
+        if (rc.getPaint() > 150) {
+            if (paintLocation == null) {
+                state = SoldierState.Roaming;
+                moveStack.clear();
+            } else {
+                state = SoldierState.BackToPainting;
+            }
+        }
+    }
+
+    public static void goPaint(RobotController rc) throws GameActionException {
+        MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
+
+        // Check for ruin and resource pattern
+        for (MapInfo tile : nearbyTiles) {
+            if (tile.hasRuin()) {
+                tryCompleteTower(rc, tile.getMapLocation());
+            }
+            if (tile.getMark() != PaintType.EMPTY) {
+                if (rc.canCompleteResourcePattern(tile.getMapLocation())) {
+                    rc.completeResourcePattern(tile.getMapLocation());
+                }
+            }
+        }
+
+        if (rc.canSenseLocation(paintLocation)) {
+            while (moveStack.size() - 1 > goBackIndex) {
+                moveStack.removeLast();
+            }
+            state = SoldierState.Painting;
+        } else if (goBackIndex < moveStack.size() - 1) {
+            Direction dir = moveStack.get(goBackIndex);
+
+            if (rc.canMove(dir)) {
+                rc.move(dir);
+                goBackIndex++;
+            }
+
+            // Refill time
+            if (rc.getPaint() < 40) {
+                if (paintTowerLocation != null) {
+                    state = SoldierState.Refill;
+                    goBackIndex = moveStack.size() - 1;
+                } else {
+                    state = SoldierState.Roaming;
+                }
+            }
+        } else {
             state = SoldierState.Roaming;
         }
     }
 
+    public static UnitType getRandomTowerType(RobotController rc) throws GameActionException {
+        int index = RobotPlayer.rng.nextInt(2);
+        if (index == 0) {
     public static UnitType getRandomTowerType(RobotController rc) throws GameActionException {
         int index = RobotPlayer.rng.nextInt(2);
         if (index == 0) {
@@ -383,7 +605,23 @@ public class Soldier {
         }
     }
 
+    public static void readMessagesFromTower(RobotController rc) throws GameActionException {
+        Message[] messages = rc.readMessages(-1);
+        if (messages.length > 0) {
+            int data = messages[0].getBytes();
+            if ((data & 2) == 2) {
+                towerToBuild = UnitType.LEVEL_ONE_PAINT_TOWER;
+            } else if ((data & 1) == 1) {
+                towerToBuild = UnitType.LEVEL_ONE_MONEY_TOWER;
+            } else {
+                towerToBuild = UnitType.LEVEL_ONE_DEFENSE_TOWER;
+            }
+            System.out.println("Alright, time to build " + towerToBuild.name());
+        }
+    }
+
     public static boolean tryMarkTower(RobotController rc, MapLocation ruinLocation) throws GameActionException {
+        UnitType towerType = towerToBuild;
         UnitType towerType = towerToBuild;
         Direction dir = RobotPlayer.directions[RobotPlayer.rng.nextInt(8)];
         if (rc.canSenseLocation(ruinLocation.subtract(dir))) {
@@ -403,16 +641,23 @@ public class Soldier {
             boolean shouldMark = true;
             for (int i = -2; i <= 2; i++) {
                 for (int j = -2; j <= 2; j++) {
+            boolean shouldMark = true;
+            for (int i = -2; i <= 2; i++) {
+                for (int j = -2; j <= 2; j++) {
                     if (rc.canSenseLocation(tileLocation.translate(i, j))) {
                         MapInfo tile = rc.senseMapInfo(tileLocation.translate(i, j));
+                        if (tile.getMark() != PaintType.EMPTY || !tile.getPaint().isAlly()) {
+                            shouldMark = false;
                         if (tile.getMark() != PaintType.EMPTY || !tile.getPaint().isAlly()) {
                             shouldMark = false;
                         }
                     } else {
                         shouldMark = false;
+                        shouldMark = false;
                     }
                 }
             }
+            if (shouldMark) {
             if (shouldMark) {
                 rc.markResourcePattern(tileLocation);
                 return true;
@@ -423,6 +668,7 @@ public class Soldier {
 
     public static boolean tryCompleteTower(RobotController rc, MapLocation ruinLocation) throws GameActionException {
         System.out.println("Trying to complete ruin at " + ruinLocation.toString());
+        System.out.println("Trying to complete ruin at " + ruinLocation.toString());
         if (rc.canCompleteTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, ruinLocation)) {
             rc.completeTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, ruinLocation);
             return true;
@@ -432,6 +678,10 @@ public class Soldier {
         } else if (rc.canCompleteTowerPattern(UnitType.LEVEL_ONE_DEFENSE_TOWER, ruinLocation)) {
             rc.completeTowerPattern(UnitType.LEVEL_ONE_DEFENSE_TOWER, ruinLocation);
             return true;
+        } else if (rc.canSenseRobotAtLocation(ruinLocation)) {
+            if (rc.senseRobotAtLocation(ruinLocation).getType().isTowerType()) {
+                return true;
+            }
         } else if (rc.canSenseRobotAtLocation(ruinLocation)) {
             if (rc.senseRobotAtLocation(ruinLocation).getType().isTowerType()) {
                 return true;

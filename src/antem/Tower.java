@@ -11,8 +11,15 @@ public class Tower {
     static int paintTowerCount = 0;
     static int moneyTowerCount = 0;
 
+    static int paintTowerCount = 0;
+    static int moneyTowerCount = 0;
+
     public static void run(RobotController rc) throws GameActionException {
         buildRobot(rc);
+        attackNearbyEnemy(rc);
+        broadcastTowerType(rc);
+        countTowerType(rc);
+        tellToBuild(rc);
         attackNearbyEnemy(rc);
         broadcastTowerType(rc);
         countTowerType(rc);
@@ -22,31 +29,47 @@ public class Tower {
             broadcastType %= 2;
         }
         rc.setIndicatorString(paintTowerCount + ":" + moneyTowerCount);
+        rc.setIndicatorString(paintTowerCount + ":" + moneyTowerCount);
     }
 
     public static void buildRobot(RobotController rc) throws GameActionException {
         if (rc.getChips() < 1100)
             return;
+        if (rc.getChips() < 1100)
+            return;
         Direction dir = RobotPlayer.directions[RobotPlayer.rng.nextInt(RobotPlayer.directions.length)];
         MapLocation nextLoc = rc.getLocation().add(dir);
         if (robotTypeToBuild <= 1) {
+        if (robotTypeToBuild <= 1) {
             if (rc.canBuildRobot(UnitType.SOLDIER, nextLoc)) {
+                robotTypeToBuild = (robotTypeToBuild + 1) % 4;
                 robotTypeToBuild = (robotTypeToBuild + 1) % 4;
                 rc.buildRobot(UnitType.SOLDIER, nextLoc);
             }
         } else if (robotTypeToBuild <= 2) {
+        } else if (robotTypeToBuild <= 2) {
             if (rc.canBuildRobot(UnitType.MOPPER, nextLoc)) {
+                robotTypeToBuild = (robotTypeToBuild + 1) % 4;
                 robotTypeToBuild = (robotTypeToBuild + 1) % 4;
                 rc.buildRobot(UnitType.MOPPER, nextLoc);
             }
         } else {
             if (rc.canBuildRobot(UnitType.SPLASHER, nextLoc)) {
                 robotTypeToBuild = (robotTypeToBuild + 1) % 4;
+                robotTypeToBuild = (robotTypeToBuild + 1) % 4;
                 rc.buildRobot(UnitType.SPLASHER, nextLoc);
             }
         }
     }
 
+    public static void attackNearbyEnemy(RobotController rc) throws GameActionException {
+        RobotInfo[] enemyInfos = rc.senseNearbyRobots(3);
+        if (enemyInfos.length > 0) {
+            RobotInfo randomEnemy = enemyInfos[RobotPlayer.rng.nextInt(enemyInfos.length)];
+            if (rc.canAttack(randomEnemy.getLocation())) {
+                rc.attack(randomEnemy.getLocation());
+            }
+        }
     public static void attackNearbyEnemy(RobotController rc) throws GameActionException {
         RobotInfo[] enemyInfos = rc.senseNearbyRobots(3);
         if (enemyInfos.length > 0) {
