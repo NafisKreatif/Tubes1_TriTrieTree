@@ -35,6 +35,7 @@ public class Mopper extends Unit {
         nearbyRobots = rc.senseNearbyRobots();
         mapData.update(rc, nearbyRobots);
         nearbyTiles = rc.senseNearbyMapInfos(8);
+        updateVisibleRuinTaint();
 
         refreshTargetIfNeeded();
 
@@ -244,6 +245,34 @@ public class Mopper extends Unit {
         }
 
         return best;
+    }
+
+    private void updateVisibleRuinTaint() throws GameActionException {
+        for (MapInfo tile : nearbyTiles) {
+            if (!tile.hasRuin()) {
+                continue;
+            }
+
+            MapLocation ruin = tile.getMapLocation();
+            if (rc.canSenseRobotAtLocation(ruin)) {
+                RobotInfo robot = rc.senseRobotAtLocation(ruin);
+                if (robot != null && robot.type.isTowerType()) {
+                    mapData.markRuin(ruin, robot.team == rc.getTeam() ? MapData.RUIN_ALLY_OWNED : MapData.RUIN_ENEMY_OWNED);
+                    continue;
+                }
+            }
+
+            mapData.markRuin(ruin, hasEnemyPaintNearRuin(ruin) ? MapData.RUIN_TAINTED : MapData.RUIN_UNCLAIMED);
+        }
+    }
+
+    private boolean hasEnemyPaintNearRuin(MapLocation ruin) throws GameActionException {
+        for (MapInfo tile : rc.senseNearbyMapInfos(ruin, 8)) {
+            if (!tile.getMapLocation().equals(ruin) && tile.getPaint().isEnemy()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private MapLocation findNearestEnemyPaint() {

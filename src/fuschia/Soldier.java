@@ -1,10 +1,8 @@
 package fuschia;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import battlecode.common.Direction;
 import battlecode.common.GameActionException;
+import battlecode.common.GameConstants;
 import battlecode.common.MapInfo;
 import battlecode.common.MapLocation;
 import battlecode.common.Message;
@@ -14,770 +12,324 @@ import battlecode.common.RobotInfo;
 import battlecode.common.UnitType;
 
 public class Soldier extends Unit {
+    private static final int REFILL_PAINT = 50;
+    private static final int BUILD_PAINT = 70;
+    private static final int FREE_PAINT = 110;
+    private static final int TARGET_TIMEOUT = 40;
 
-    enum SoldierState {
-        REFILL,
-        COMBAT,
-        TOWER_BUILD,
-        TAINT,
-        SRP_BUILD,
-        EXPLORE
+    private enum SoldierState { REFILL, COMBAT, BUILD_TOWER, BUILD_RESOURCE, EXPLORE }
+    private enum ObjectiveType { TOWER, RESOURCE }
+
+    private static final class Objective {
+        private final ObjectiveType type;
+        private final MapLocation location;
+        private Objective(ObjectiveType type, MapLocation location) {
+            this.type = type;
+            this.location = location;
+        }
     }
 
-    private final List<Direction> moveHistory = new ArrayList<>(); // to move back to
-    private Direction moveDirection;
-
-    private RobotInfo[] nearbyRobots = new RobotInfo[0];
-    private MapLocation knownPaintTower;
-    private UnitType towerToBuild;
-
-    private boolean refillMode;
-    private boolean returnMode;
-    private int returnIndex = -1;
-
-    private Objective objective;
     private SoldierState state = SoldierState.EXPLORE;
-    private boolean objectiveFromFreshMark;
+    private RobotInfo[] nearbyRobots = new RobotInfo[0];
+    private MapInfo[] nearbyTiles = new MapInfo[0];
+    private MapLocation paintTowerLocation;
+    private Objective objective;
+    private UnitType towerToBuild = UnitType.LEVEL_ONE_PAINT_TOWER;
+    private Direction roamDirection;
 
     public Soldier(RobotController rc) {
         super(rc);
-        int spread = (rc.getLocation().x * 73 + rc.getLocation().y * 97 + rc.getRoundNum() * 31) & 7;
-        moveDirection = Direction.values()[spread];
-        for (int i = 0; i < spread; i++) {
-            rng.nextInt();
-        }
-        towerToBuild = UnitType.LEVEL_ONE_PAINT_TOWER;
+        int seed = (rc.getLocation().x * 73 + rc.getLocation().y * 97 + rc.getRoundNum() * 31) & 7;
+        roamDirection = Direction.values()[seed];
+        if (roamDirection == Direction.CENTER) roamDirection = Direction.NORTH;
+        targetTimer = TARGET_TIMEOUT;
     }
 
     @Override
     protected void determineState() throws GameActionException {
-        readMessagesFromTower();
-        
         nearbyRobots = rc.senseNearbyRobots();
-        mapData.update(rc, nearbyRobots);
+        nearbyTiles = rc.senseNearbyMapInfos();
+        readTowerDirective();
+        refreshPaintTowerLocation();
 
-        refreshKnownPaintTower();
-
-        if (!refillMode && rc.getPaint() < 60 && knownPaintTower != null) {
-            refillMode = true;
-            returnMode = false;
-            returnIndex = moveHistory.size() - 1;
+        if (objective != null && isObjectiveDone()) objective = null;
+        if (rc.getPaint() < REFILL_PAINT && paintTowerLocation != null) {
+            state = SoldierState.REFILL;
+            return;
         }
-
-        if (refillMode && rc.getPaint() > 180) {
-            refillMode = false;
-            returnMode = objective != null && returnIndex >= 0;
+        if (findCombatRobot() != null) {
+            state = SoldierState.COMBAT;
+            return;
         }
-
-        if (isObjectiveCompleted()) {
-            clearObjective();
+        if (objective == null) objective = findObjective();
+        if (objective != null) {
+            state = objective.type == ObjectiveType.TOWER ? SoldierState.BUILD_TOWER : SoldierState.BUILD_RESOURCE;
+            return;
         }
+        refreshTargetIfNeeded();
+        state = SoldierState.EXPLORE;
     }
 
     @Override
     protected void executeState() throws GameActionException {
-        if (refillMode) {
-            state = SoldierState.REFILL;
-            rc.setIndicatorString(state.toString());
-            if (doRefill()) {
-                markProductiveAction();
-            }
-            return;
-        }
-
-        if (returnMode) {
-            state = SoldierState.EXPLORE;
-            rc.setIndicatorString(state.toString());
-            if (doReturnToFront()) {
-                markProductiveAction();
-            }
-            return;
-        }
-
-        state = SoldierState.EXPLORE;
-
-        boolean productive = false;
-        if (tryCompleteNearbyPatterns()) {
-            productive = true;
-        }
-
-        if (tryMarkNewTowers()) {
-            productive = true;
-        }
-
-        if (tryMarkNewSRPs()) {
-            productive = true;
-        }
-
-        if (tryAttackEnemyTower()) {
-            state = SoldierState.COMBAT;
-            productive = true;
-        }
-
-        if (objective == null) {
-            selectObjective();
-        }
-
-        if (objective != null && executeObjective()) {
-            productive = true;
-        }
-
-        if (roamAndPaint()) {
-            productive = true;
-        }
-
-        rc.setIndicatorString(state.toString());
-        // rc.setIndicatorString("" + rc.getNumberTowers());
-
-        if (productive) {
-            markProductiveAction();
-        }
+        boolean productive = tryCompleteNearbyPatterns() | upgradeNearbyTowers();
+        productive |= switch (state) {
+            case REFILL -> doRefill();
+            case COMBAT -> doCombat();
+            case BUILD_TOWER -> doTowerObjective();
+            case BUILD_RESOURCE -> doResourceObjective();
+            case EXPLORE -> doExplore();
+        };
+        if (!productive && state != SoldierState.EXPLORE) productive |= doExplore();
+        if (productive) markProductiveAction();
+        rc.setIndicatorString(objective == null ? state.toString() : state + " " + objective.location + " " + towerToBuild.name());
+        targetTimer -= 1;
     }
 
     private boolean doRefill() throws GameActionException {
-        refreshKnownPaintTower();
-        if (knownPaintTower == null) {
-            refillMode = false;
-            moveHistory.clear();
-            return false;
-        }
+        if (paintTowerLocation == null) return false;
+        if (rc.getLocation().distanceSquaredTo(paintTowerLocation) > 2) return stepToward(paintTowerLocation);
+        if (!rc.canTransferPaint(paintTowerLocation, -100)) return false;
+        rc.transferPaint(paintTowerLocation, -100);
+        idleTimer = 0;
+        return true;
+    }
 
+    private boolean doCombat() throws GameActionException {
+        RobotInfo target = findCombatRobot();
+        if (target == null) return false;
         boolean productive = false;
-        if (rc.getLocation().distanceSquaredTo(knownPaintTower) > 2) {
-            productive |= moveToward(knownPaintTower, false);
-        } else if (rc.canTransferPaint(knownPaintTower, -100)) {
-            rc.transferPaint(knownPaintTower, -100);
+        if (!rc.canAttack(target.location)) productive |= stepToward(target.location);
+        if (rc.canAttack(target.location)) {
+            rc.attack(target.location);
             productive = true;
         }
-
-        for (RobotInfo ally : rc.senseNearbyRobots(-1, rc.getTeam())) {
-            if (rc.canUpgradeTower(ally.location)) {
-                rc.upgradeTower(ally.location);
-                productive = true;
-            }
-        }
-
-        if (rc.getPaint() > 180) {
-            refillMode = false;
-            returnMode = objective != null && returnIndex >= 0;
-            if (!returnMode) {
-                moveHistory.clear();
-            }
-        }
-
+        if (rc.isMovementReady() && isTowerType(target.type)) productive |= stepToward(target.location);
         return productive;
     }
 
-    private boolean doReturnToFront() throws GameActionException {
-        if (returnIndex < 0 || returnIndex >= moveHistory.size()) {
-            returnMode = false;
-            return true;
-        }
-
-        Direction dir = moveHistory.get(returnIndex);
-        if (moveIfPossible(dir, false)) {
-            returnIndex += 1;
-            if (returnIndex >= moveHistory.size()) {
-                returnMode = false;
-            }
-            return true;
-        }
-
-        returnMode = false;
-        return false;
-    }
-
-    private void selectObjective() throws GameActionException {
-        PatternPlan plan = findAndMarkNewRuinPattern();
-        if (plan != null) {
-            objective = Objective.tower(plan.location, plan.towerType);
-            objectiveFromFreshMark = true;
-            return;
-        }
-
-        MapLocation incompleteTower = findIncompleteAllyPatternCenter();
-        if (incompleteTower != null) {
-            objective = Objective.tower(incompleteTower, towerToBuild);
-            objectiveFromFreshMark = false;
-            return;
-        }
-
-        MapLocation resourceCenter = findResourceObjective();
-        if (resourceCenter != null) {
-            objective = Objective.resource(resourceCenter);
-            objectiveFromFreshMark = false;
-        }
-    }
-
-    private boolean executeObjective() throws GameActionException {
-        if (objective == null) {
+    private boolean doTowerObjective() throws GameActionException {
+        if (objective == null) return false;
+        MapLocation center = objective.location;
+        if (!isRuinAvailable(center)) {
+            objective = null;
             return false;
         }
+        if (rc.getPaint() < BUILD_PAINT && paintTowerLocation != null) return doRefill();
+        if (!rc.canSenseLocation(center)) return stepToward(center);
 
-        return objective.isResource ? executeResourceObjective() : executeTowerObjective();
-    }
-
-    private boolean executeTowerObjective() throws GameActionException {
-        if (objective == null) {
-            return false;
-        }
-
-        if (rc.getPaint() < 60) {
-            refillMode = true;
-            returnMode = false;
-            returnIndex = moveHistory.size() - 1;
-            return false;
-        }
-
-        state = objectiveFromFreshMark ? SoldierState.TAINT : SoldierState.TOWER_BUILD;
-        MapLocation objectiveCenter = objective.location;
         boolean productive = false;
-        
-        if (rc.canMarkTowerPattern(towerToBuild, objectiveCenter)) {
-            rc.markTowerPattern(towerToBuild, objectiveCenter);
+        if (!hasAllyPatternMark(center, 8) && rc.canMarkTowerPattern(towerToBuild, center)) {
+            rc.markTowerPattern(towerToBuild, center);
+            mapData.markRuin(center, MapData.RUIN_TAINTED);
             productive = true;
         }
 
-        MapInfo[] patternTiles = rc.senseNearbyMapInfos(objectiveCenter, 8);
-        MapLocation unpainted = findNearestUnpaintedPatternTile(objectiveCenter, patternTiles);
-        
-        if (unpainted == null && patternTiles.length > 0) {
-            unpainted = findNearestEmptyTile(objectiveCenter, patternTiles);
-        }
-        
-        if (unpainted != null) {
-            if (!tryPaintTile(unpainted)) {
-                productive |= moveToward(unpainted, true);
-                productive |= tryPaintTile(unpainted);
+        MapLocation workTile = findMarkedMismatch(center, 8);
+        if (workTile != null) {
+            if (!tryPaintTile(workTile)) {
+                productive |= stepToward(workTile);
+                productive |= tryPaintTile(workTile);
             } else {
                 productive = true;
             }
-        } else {
-            productive |= moveToward(objectiveCenter, true);
         }
 
-        UnitType completionType = findCompletableTowerType(objectiveCenter);
+        UnitType completionType = findCompletableTowerType(center);
         if (completionType != null) {
-            rc.completeTowerPattern(completionType, objectiveCenter);
-            mapData.markRuin(objectiveCenter, MapData.RUIN_ALLY_OWNED);
-            clearObjective();
-            productive = true;
-        } else {
-            objectiveFromFreshMark = false;
+            rc.completeTowerPattern(completionType, center);
+            mapData.markRuin(center, MapData.RUIN_ALLY_OWNED);
+            objective = null;
+            return true;
         }
-
-        return productive;
+        return productive || stepToward(center);
     }
 
-    private boolean executeResourceObjective() throws GameActionException {
-        if (objective == null) {
-            return false;
-        }
+    private boolean doResourceObjective() throws GameActionException {
+        if (objective == null) return false;
+        MapLocation center = objective.location;
+        if (rc.getPaint() < BUILD_PAINT && paintTowerLocation != null) return doRefill();
+        if (!rc.canSenseLocation(center)) return stepToward(center);
 
-        state = SoldierState.SRP_BUILD;
-        MapLocation objectiveCenter = objective.location;
         boolean productive = false;
-        if (shouldMarkResourcePattern(objectiveCenter) && rc.canMarkResourcePattern(objectiveCenter)) {
-            rc.markResourcePattern(objectiveCenter);
+        if (shouldMarkResourcePattern(center)) {
+            rc.markResourcePattern(center);
             productive = true;
         }
 
-        MapInfo[] tiles = rc.senseNearbyMapInfos(objectiveCenter, 8);
-        MapLocation unpainted = findNearestUnpaintedResourceTile(objectiveCenter, tiles);
-        if (unpainted != null) {
-            if (!tryPaintTile(unpainted)) {
-                productive |= moveToward(unpainted, true);
-                productive |= tryPaintTile(unpainted);
+        MapLocation workTile = findMarkedMismatch(center, 4);
+        if (workTile != null) {
+            if (!tryPaintTile(workTile)) {
+                productive |= stepToward(workTile);
+                productive |= tryPaintTile(workTile);
             } else {
                 productive = true;
             }
-        } else {
-            productive |= moveToward(objectiveCenter, true);
         }
 
-        if (rc.canCompleteResourcePattern(objectiveCenter)) {
-            rc.completeResourcePattern(objectiveCenter);
-            clearObjective();
-            productive = true;
+        if (rc.canCompleteResourcePattern(center)) {
+            rc.completeResourcePattern(center);
+            objective = null;
+            return true;
         }
-
-        return productive;
+        return productive || stepToward(center);
     }
 
-    private boolean roamAndPaint() throws GameActionException {
+    private boolean doExplore() throws GameActionException {
         boolean productive = false;
-
-        boolean shouldPaint;
-        if (objective == null) {
-            shouldPaint = rc.getPaint() > 200;
-        } else {
-            int distToObjective = rc.getLocation().distanceSquaredTo(objective.location);
-            shouldPaint = (distToObjective > 13 && rc.getPaint() > 100) || 
-                          (distToObjective <= 13 && rc.getPaint() > 120);
-        }
-        
-        if (shouldPaint) {
+        if (rc.getPaint() >= FREE_PAINT) {
             MapLocation paintTarget = findBestPaintTarget();
-            if (paintTarget != null && tryPaintTile(paintTarget)) {
-                productive = true;
-                Direction attackDir = rc.getLocation().directionTo(paintTarget);
-                if (attackDir != Direction.CENTER) {
-                    moveIfPossible(attackDir, true);
-                }
-            }
+            if (paintTarget != null && tryPaintTile(paintTarget)) productive = true;
         }
 
-        MapLocation chaseTarget = null;
-        if (rng.nextInt(3) < 2) {
-            MapLocation nearest = findNearestEnemyPaintTile();
-            if (nearest != null && rc.getLocation().distanceSquaredTo(nearest) <= 20) {
-                chaseTarget = nearest;
-            }
+        MapLocation moveTarget = pickExploreTarget();
+        productive |= moveTarget != null ? stepToward(moveTarget) : moveInRoamDirection();
+        if (productive) {
+            idleTimer = 0;
+            return true;
         }
 
-        if (chaseTarget != null) {
-            productive |= moveToward(chaseTarget, true);
-        } else if (objective == null) {
-            MapLocation ruinTarget = findNearestUnclaimedRuin();
-            if (ruinTarget != null && moveToward(ruinTarget, true)) {
-                productive = true;
-            } else if (rc.isMovementReady()) {
-                if (moveIfPossible(moveDirection, true)) {
-                    productive = true;
-                } else {
-                    boolean moved = false;
-                    for (int rot = 1; rot <= 3 && !moved; rot++) {
-                        for (int flip = -1; flip <= 1; flip += 2) {
-                            Direction adj = Direction.values()[(moveDirection.ordinal() + rot * flip + 8) % 8];
-                            if (moveIfPossible(adj, true)) {
-                                moveDirection = adj;
-                                productive = true;
-                                moved = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (rc.isMovementReady() && rng.nextInt(10) == 0) {
-                        moveDirection = Direction.values()[rng.nextInt(8)];
-                    }
-                }
-            }
-        } else if (rc.isMovementReady()) {
-            if (moveIfPossible(moveDirection, true)) {
-                productive = true;
-            } else {
-                boolean moved = false;
-                for (int rot = 1; rot <= 3 && !moved; rot++) {
-                    for (int flip = -1; flip <= 1; flip += 2) {
-                        Direction adj = Direction.values()[(moveDirection.ordinal() + rot * flip + 8) % 8];
-                        if (moveIfPossible(adj, true)) {
-                            moveDirection = adj;
-                            productive = true;
-                            moved = true;
-                            break;
-                        }
-                    }
-                }
-                if (rc.isMovementReady() && rng.nextInt(10) == 0) {
-                    moveDirection = Direction.values()[rng.nextInt(8)];
-                }
-            }
+        idleTimer += 1;
+        if (idleTimer >= 10) {
+            setTarget(getOppositeCorner(rc.getLocation()));
+            targetTimer = TARGET_TIMEOUT;
+            idleTimer = 0;
         }
-
-        return productive;
-    }
-
-    private boolean tryAttackEnemyTower() throws GameActionException {
-        RobotInfo best = null;
-        int bestDist = Integer.MAX_VALUE;
-        for (RobotInfo robot : nearbyRobots) {
-            if (robot.team != rc.getTeam().opponent()) {
-                continue;
-            }
-            int dist = rc.getLocation().distanceSquaredTo(robot.location);
-            if (dist < bestDist) {
-                bestDist = dist;
-                best = robot;
-            }
-        }
-
-        if (best == null) {
-            return false;
-        }
-
-        boolean productive = false;
-        if (rc.canAttack(best.location)) {
-            rc.attack(best.location);
-            productive = true;
-        }
-
-        if (rc.isMovementReady()) {
-            productive |= moveToward(best.location, true);
-        }
-
-        return productive;
+        return moveInRoamDirection();
     }
 
     private boolean tryCompleteNearbyPatterns() throws GameActionException {
         boolean completed = false;
-        for (MapInfo tile : rc.senseNearbyMapInfos()) {
+        for (MapInfo tile : nearbyTiles) {
             MapLocation loc = tile.getMapLocation();
-            if (tile.hasRuin()) {
-                if (rc.canSenseRobotAtLocation(loc)) {
-                    RobotInfo robot = rc.senseRobotAtLocation(loc);
-                    if (robot != null && robot.type.isTowerType()) {
-                        continue;
-                    }
-                }
-                
+            if (tile.hasRuin() && !hasTowerAt(loc)) {
                 UnitType completionType = findCompletableTowerType(loc);
                 if (completionType != null) {
                     rc.completeTowerPattern(completionType, loc);
                     mapData.markRuin(loc, MapData.RUIN_ALLY_OWNED);
+                    if (objective != null && objective.location.equals(loc)) objective = null;
                     completed = true;
                 }
             }
             if (tile.getMark() != PaintType.EMPTY && rc.canCompleteResourcePattern(loc)) {
                 rc.completeResourcePattern(loc);
+                if (objective != null && objective.type == ObjectiveType.RESOURCE && objective.location.equals(loc)) {
+                    objective = null;
+                }
                 completed = true;
             }
         }
         return completed;
     }
 
-    private boolean tryMarkNewTowers() throws GameActionException {
-        boolean marked = false;
-        for (MapInfo visible : rc.senseNearbyMapInfos()) {
-            if (!visible.hasRuin()) {
-                continue;
-            }
-
-            MapLocation ruinCenter = visible.getMapLocation();
-            if (!isRuinUnclaimed(ruinCenter)) {
-                continue;
-            }
-
-            if (hasAllyPatternMark(ruinCenter)) {
-                continue;
-            }
-
-            if (rc.canMarkTowerPattern(towerToBuild, ruinCenter)) {
-                rc.markTowerPattern(towerToBuild, ruinCenter);
-                mapData.markRuin(ruinCenter, MapData.RUIN_TAINTED);
-                marked = true;
+    private boolean upgradeNearbyTowers() throws GameActionException {
+        boolean upgraded = false;
+        for (RobotInfo ally : rc.senseNearbyRobots(2, rc.getTeam())) {
+            if (ally.type.isTowerType() && rc.canUpgradeTower(ally.location)) {
+                rc.upgradeTower(ally.location);
+                upgraded = true;
             }
         }
-        return marked;
+        return upgraded;
     }
 
-    private boolean tryMarkNewSRPs() throws GameActionException {
-        boolean marked = false;
-        for (MapInfo visible : rc.senseNearbyMapInfos()) {
-            MapLocation at = visible.getMapLocation();
-            if ((at.x % 4 != 2) || (at.y % 4 != 2)) {
-                continue;
-            }
+    private Objective findObjective() throws GameActionException {
+        Objective towerObjective = findTowerObjective();
+        return towerObjective != null ? towerObjective : findResourceObjective();
+    }
 
-            if (visible.getMark() != PaintType.EMPTY) {
-                continue;
-            }
-
-            boolean hasSRP = false;
-            for (MapInfo nearby : rc.senseNearbyMapInfos()) {
-                if (!nearby.getMapLocation().equals(at) && nearby.getMark() != PaintType.EMPTY) {
-                    MapLocation nearbyLoc = nearby.getMapLocation();
-                    if ((nearbyLoc.x % 4 == 2) && (nearbyLoc.y % 4 == 2)) {
-                        if (at.distanceSquaredTo(nearbyLoc) <= 8) {
-                            hasSRP = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            if (hasSRP) {
-                continue;
-            }
-
-            boolean valid = true;
-            for (int i = -2; i <= 2; i++) {
-                for (int j = -2; j <= 2; j++) {
-                    MapLocation check = at.translate(i, j);
-                    if (rc.canSenseLocation(check)) {
-                        MapInfo tile = rc.senseMapInfo(check);
-                        if (tile.isWall() || tile.hasRuin() || !tile.getPaint().isAlly()) {
-                            valid = false;
-                            break;
-                        }
-                    } else {
-                        valid = false;
-                        break;
-                    }
-                }
-                if (!valid) break;
-            }
-
-            if (valid && rc.canMarkResourcePattern(at)) {
-                rc.markResourcePattern(at);
-                marked = true;
+    private Objective findTowerObjective() throws GameActionException {
+        if (rc.getNumberTowers() >= GameConstants.MAX_NUMBER_OF_TOWERS) return null;
+        MapLocation me = rc.getLocation();
+        MapLocation best = null;
+        int bestDistance = Integer.MAX_VALUE;
+        for (MapInfo tile : nearbyTiles) {
+            if (!tile.hasRuin()) continue;
+            MapLocation center = tile.getMapLocation();
+            if (!isRuinAvailable(center)) continue;
+            int distance = me.distanceSquaredTo(center);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = center;
             }
         }
-        return marked;
+        return best == null ? null : new Objective(ObjectiveType.TOWER, best);
     }
 
-    private PatternPlan findAndMarkNewRuinPattern() throws GameActionException {
-        for (MapInfo visible : rc.senseNearbyMapInfos()) {
-            if (!visible.hasRuin()) {
-                continue;
-            }
-
-            MapLocation ruinCenter = visible.getMapLocation();
-            if (!isRuinUnclaimed(ruinCenter)) {
-                continue;
-            }
-
-            if (hasAllyPatternMark(ruinCenter)) {
-                continue;
-            }
-
-            if (rc.canMarkTowerPattern(towerToBuild, ruinCenter)) {
-                rc.markTowerPattern(towerToBuild, ruinCenter);
-                mapData.markRuin(ruinCenter, MapData.RUIN_TAINTED);
-                return new PatternPlan(ruinCenter, towerToBuild);
-            }
-        }
-
-        return null;
-    }
-
-
-
-    private MapLocation findResourceObjective() throws GameActionException {
+    private Objective findResourceObjective() throws GameActionException {
         MapLocation me = rc.getLocation();
         if (isValidSrpCenter(me) && (shouldMarkResourcePattern(me) || hasIncompleteResourcePattern(me))) {
-            return me;
+            return new Objective(ObjectiveType.RESOURCE, me);
         }
-
         for (MapInfo tile : rc.senseNearbyMapInfos(1)) {
             MapLocation candidate = tile.getMapLocation();
-            if (isValidSrpCenter(candidate)
-                    && (shouldMarkResourcePattern(candidate) || hasIncompleteResourcePattern(candidate))) {
-                return candidate;
+            if (isValidSrpCenter(candidate) && (shouldMarkResourcePattern(candidate) || hasIncompleteResourcePattern(candidate))) {
+                return new Objective(ObjectiveType.RESOURCE, candidate);
             }
         }
-
         return null;
     }
 
-    private MapLocation findBestPaintTarget() {
-        MapLocation me = rc.getLocation();
-        MapLocation best = null;
+    private RobotInfo findCombatRobot() {
+        RobotInfo best = null;
         int bestScore = Integer.MIN_VALUE;
-
-        for (MapInfo tile : rc.senseNearbyMapInfos()) {
-            MapLocation loc = tile.getMapLocation();
-            if (tile.isWall() || tile.hasRuin() || !rc.canAttack(loc)) {
-                continue;
-            }
-
-            PaintType paint = tile.getPaint();
-            PaintType mark = tile.getMark();
-
-            int score = 0;
-            if (paint.isEnemy()) {
-                score += 60;
-            } else if (paint == PaintType.EMPTY) {
-                score += 20;
-            }
-
-            if (mark == PaintType.ALLY_PRIMARY || mark == PaintType.ALLY_SECONDARY) {
-                boolean paintedCorrectly
-                        = (mark == PaintType.ALLY_PRIMARY && paint == PaintType.ALLY_PRIMARY)
-                        || (mark == PaintType.ALLY_SECONDARY && paint == PaintType.ALLY_SECONDARY);
-                if (!paintedCorrectly) {
-                    score += 15;
-                }
-            }
-
-            score -= me.distanceSquaredTo(loc);
-
+        MapLocation me = rc.getLocation();
+        for (RobotInfo robot : nearbyRobots) {
+            if (robot.team != rc.getTeam().opponent()) continue;
+            int score = isTowerType(robot.type) ? 100 : 40;
+            if (rc.canAttack(robot.location)) score += 25;
+            score -= me.distanceSquaredTo(robot.location);
             if (score > bestScore) {
                 bestScore = score;
-                best = loc;
+                best = robot;
             }
         }
-
         return best;
     }
 
-    private MapLocation findNearestEnemyPaintTile() {
+    private MapLocation pickExploreTarget() {
         MapLocation me = rc.getLocation();
-        MapLocation best = null;
-        int bestDistance = Integer.MAX_VALUE;
-
-        for (MapInfo tile : rc.senseNearbyMapInfos()) {
-            if (!tile.getPaint().isEnemy()) {
-                continue;
-            }
-
-            int distance = me.distanceSquaredTo(tile.getMapLocation());
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                best = tile.getMapLocation();
-            }
+        MapLocation enemyPaint = findNearestEnemyPaint();
+        if (enemyPaint != null) return enemyPaint;
+        MapLocation ruin = mapData.getNearestUnclaimed(me);
+        if (ruin != null) return ruin;
+        MapLocation target = getTargetLocation();
+        if (me.distanceSquaredTo(target) <= 4 || targetTimer <= 0) {
+            setTarget(getOppositeCorner(me));
+            targetTimer = TARGET_TIMEOUT;
+            target = getTargetLocation();
         }
-
-        return best;
+        return target;
     }
 
-    private MapLocation findNearestUnclaimedRuin() throws GameActionException {
-        MapLocation me = rc.getLocation();
-        MapLocation best = null;
-        int bestDistance = Integer.MAX_VALUE;
-
-        for (MapInfo tile : rc.senseNearbyMapInfos()) {
-            if (!tile.hasRuin()) {
-                continue;
-            }
-
-            MapLocation ruinLoc = tile.getMapLocation();
-            if (!isRuinUnclaimed(ruinLoc) || hasAllyPatternMark(ruinLoc)) {
-                continue;
-            }
-
-            int distance = me.distanceSquaredTo(ruinLoc);
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                best = ruinLoc;
-            }
-        }
-
-        return best;
-    }
-
-    private boolean moveToward(MapLocation target, boolean recordHistory) throws GameActionException {
-        if (target == null || !rc.isMovementReady()) {
-            return false;
-        }
-
-        Direction direct = rc.getLocation().directionTo(target);
-        Direction[] prefs = {
-            direct,
-            direct.rotateLeft(),
-            direct.rotateRight(),
-            direct.rotateLeft().rotateLeft(),
-            direct.rotateRight().rotateRight(),
-            direct.opposite()
-        };
-
-        for (Direction dir : prefs) {
-            if (dir != Direction.CENTER && moveIfPossible(dir, recordHistory)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private boolean moveIfPossible(Direction dir, boolean recordHistory) throws GameActionException {
-        if (dir == null || dir == Direction.CENTER || !rc.isMovementReady() || !rc.canMove(dir)) {
-            return false;
-        }
-
-        rc.move(dir);
-        moveDirection = dir;
-
-        if (recordHistory && knownPaintTower != null && !refillMode && !returnMode) {
-            moveHistory.add(dir);
-            if (moveHistory.size() > 240) {
-                moveHistory.remove(0);
-            }
-            returnIndex = moveHistory.size() - 1;
-        }
-
-        return true;
-    }
-
-    private boolean tryPaintTile(MapLocation tile) throws GameActionException {
-        if (tile == null || !rc.canAttack(tile)) {
-            return false;
-        }
-
-        PaintType mark = rc.senseMapInfo(tile).getMark();
-        if (mark == PaintType.ALLY_PRIMARY || mark == PaintType.ALLY_SECONDARY) {
-            rc.attack(tile, mark == PaintType.ALLY_SECONDARY);
-        } else {
-            rc.attack(tile);
-        }
-        return true;
-    }
-
-    private boolean isObjectiveCompleted() throws GameActionException {
-        if (objective == null) {
-            return false;
-        }
-
-        if (objective.isResource) {
-            if (!rc.canSenseLocation(objective.location)) {
-                return false;
-            }
-            return findIncompleteResourcePatternTile(objective.location, rc.senseNearbyMapInfos(objective.location, 8)) == null
-                    && !rc.canCompleteResourcePattern(objective.location);
-        }
-
-        if (!rc.canSenseLocation(objective.location)) {
-            return false;
-        }
-
-        if (rc.canSenseRobotAtLocation(objective.location)) {
-            RobotInfo at = rc.senseRobotAtLocation(objective.location);
-            return at != null && isTowerType(at.type) && at.team == rc.getTeam();
-        }
-
-        return false;
-    }
-
-    private void clearObjective() {
-        objective = null;
-        objectiveFromFreshMark = false;
-    }
-
-    private void readMessagesFromTower() throws GameActionException {
+    private void readTowerDirective() throws GameActionException {
         Message[] messages = rc.readMessages(-1);
-        if (messages.length > 0) {
-            int data = messages[0].getBytes();
-            if ((data & 2) == 2) {
-                towerToBuild = UnitType.LEVEL_ONE_PAINT_TOWER;
-            } else if ((data & 1) == 1) {
-                towerToBuild = UnitType.LEVEL_ONE_MONEY_TOWER;
-            } else {
-                towerToBuild = UnitType.LEVEL_ONE_DEFENSE_TOWER;
-            }
+        for (Message message : messages) {
+            int data = message.getBytes();
+            if (data < 0 || data > 3) continue;
+            if ((data & 2) == 2) towerToBuild = UnitType.LEVEL_ONE_PAINT_TOWER;
+            else if ((data & 1) == 1) towerToBuild = UnitType.LEVEL_ONE_MONEY_TOWER;
+            else towerToBuild = UnitType.LEVEL_ONE_DEFENSE_TOWER;
+            return;
         }
     }
 
-    private void refreshKnownPaintTower() throws GameActionException {
+    private void refreshPaintTowerLocation() {
         MapLocation me = rc.getLocation();
-        int bestDistance = Integer.MAX_VALUE;
         MapLocation best = null;
-
-        for (RobotInfo ally : rc.senseNearbyRobots(-1, rc.getTeam())) {
-            if (!isPaintTower(ally.type)) {
-                continue;
-            }
+        int bestDistance = Integer.MAX_VALUE;
+        for (RobotInfo ally : nearbyRobots) {
+            if (ally.team != rc.getTeam() || !isPaintTower(ally.type)) continue;
             int distance = me.distanceSquaredTo(ally.location);
             if (distance < bestDistance) {
                 bestDistance = distance;
                 best = ally.location;
             }
         }
-
         if (best == null) {
             for (int i = 0; i < mapData.towerCount; i++) {
                 UnitType type = UnitType.values()[mapData.towerTypes[i]];
-                if (!isPaintTower(type)) {
-                    continue;
-                }
+                if (!isPaintTower(type)) continue;
                 int distance = me.distanceSquaredTo(mapData.knownTowers[i]);
                 if (distance < bestDistance) {
                     bestDistance = distance;
@@ -785,189 +337,161 @@ public class Soldier extends Unit {
                 }
             }
         }
-
-        if (best != null) {
-            knownPaintTower = best;
-        }
+        paintTowerLocation = best;
     }
 
-    private MapLocation findIncompleteAllyPatternCenter() throws GameActionException {
-        for (MapInfo visible : rc.senseNearbyMapInfos()) {
-            if (!visible.hasRuin()) {
-                continue;
+    private boolean isObjectiveDone() throws GameActionException {
+        if (objective == null || !rc.canSenseLocation(objective.location)) return false;
+        if (objective.type == ObjectiveType.RESOURCE) {
+            return !shouldMarkResourcePattern(objective.location)
+                    && !hasIncompleteResourcePattern(objective.location)
+                    && !rc.canCompleteResourcePattern(objective.location);
+        }
+        return hasTowerAt(objective.location) || !isRuinAvailable(objective.location);
+    }
+
+    private boolean isRuinAvailable(MapLocation center) throws GameActionException {
+        if (center == null || rc.getNumberTowers() >= GameConstants.MAX_NUMBER_OF_TOWERS) return false;
+        return !rc.canSenseLocation(center) || !hasTowerAt(center);
+    }
+
+    private boolean hasTowerAt(MapLocation location) throws GameActionException {
+        if (!rc.canSenseLocation(location) || !rc.canSenseRobotAtLocation(location)) return false;
+        RobotInfo robot = rc.senseRobotAtLocation(location);
+        return robot != null && robot.type.isTowerType();
+    }
+
+    private MapLocation findMarkedMismatch(MapLocation center, int maxDistanceSquared) throws GameActionException {
+        MapLocation me = rc.getLocation();
+        MapLocation best = null;
+        int bestDistance = Integer.MAX_VALUE;
+        for (MapInfo tile : rc.senseNearbyMapInfos(center, 8)) {
+            MapLocation loc = tile.getMapLocation();
+            if (loc.distanceSquaredTo(center) > maxDistanceSquared || tile.isWall() || tile.hasRuin()) continue;
+            PaintType mark = tile.getMark();
+            if (mark != PaintType.ALLY_PRIMARY && mark != PaintType.ALLY_SECONDARY) continue;
+            PaintType paint = tile.getPaint();
+            boolean matched = (mark == PaintType.ALLY_PRIMARY && paint == PaintType.ALLY_PRIMARY)
+                    || (mark == PaintType.ALLY_SECONDARY && paint == PaintType.ALLY_SECONDARY);
+            if (matched) continue;
+            int distance = me.distanceSquaredTo(loc);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = loc;
             }
+        }
+        return best;
+    }
 
-            MapLocation ruinCenter = visible.getMapLocation();
-            boolean hasAllyMark = false;
-            boolean hasIncompleteMarkedTile = false;
-
-            for (MapInfo tile : rc.senseNearbyMapInfos(ruinCenter, 8)) {
-                PaintType mark = tile.getMark();
-                if (mark != PaintType.ALLY_PRIMARY && mark != PaintType.ALLY_SECONDARY) {
-                    continue;
-                }
-
-                hasAllyMark = true;
-                PaintType paint = tile.getPaint();
-                boolean paintedCorrectly
-                        = (mark == PaintType.ALLY_PRIMARY && paint == PaintType.ALLY_PRIMARY)
+    private MapLocation findBestPaintTarget() {
+        MapLocation me = rc.getLocation();
+        MapLocation best = null;
+        int bestScore = Integer.MIN_VALUE;
+        for (MapInfo tile : nearbyTiles) {
+            MapLocation loc = tile.getMapLocation();
+            if (tile.isWall() || tile.hasRuin() || !rc.canAttack(loc)) continue;
+            int score = 0;
+            PaintType paint = tile.getPaint();
+            PaintType mark = tile.getMark();
+            if (paint.isEnemy()) score += 45;
+            else if (paint == PaintType.EMPTY) score += 10;
+            if (mark == PaintType.ALLY_PRIMARY || mark == PaintType.ALLY_SECONDARY) {
+                boolean matched = (mark == PaintType.ALLY_PRIMARY && paint == PaintType.ALLY_PRIMARY)
                         || (mark == PaintType.ALLY_SECONDARY && paint == PaintType.ALLY_SECONDARY);
-                if (!paintedCorrectly) {
-                    hasIncompleteMarkedTile = true;
-                    break;
-                }
+                if (!matched) score += 20;
             }
-
-            if (hasAllyMark && hasIncompleteMarkedTile) {
-                return ruinCenter;
-            }
-        }
-        return null;
-    }
-
-    private MapLocation findNearestUnpaintedPatternTile(MapLocation center, MapInfo[] nearbyTiles) {
-        MapLocation me = rc.getLocation();
-        MapLocation best = null;
-        int bestDist = Integer.MAX_VALUE;
-
-        for (MapInfo tile : nearbyTiles) {
-            MapLocation loc = tile.getMapLocation();
-            if (loc.distanceSquaredTo(center) > 8 || tile.isWall() || tile.hasRuin()) {
-                continue;
-            }
-
-            PaintType mark = tile.getMark();
-            if (mark != PaintType.ALLY_PRIMARY && mark != PaintType.ALLY_SECONDARY) {
-                continue;
-            }
-
-            PaintType paint = tile.getPaint();
-            boolean paintedCorrectly
-                    = (mark == PaintType.ALLY_PRIMARY && paint == PaintType.ALLY_PRIMARY)
-                    || (mark == PaintType.ALLY_SECONDARY && paint == PaintType.ALLY_SECONDARY);
-            if (paintedCorrectly) {
-                continue;
-            }
-
-            int dist = me.distanceSquaredTo(loc);
-            if (dist < bestDist) {
-                bestDist = dist;
+            score -= me.distanceSquaredTo(loc);
+            if (score > bestScore) {
+                bestScore = score;
                 best = loc;
             }
         }
-
         return best;
     }
 
-    private MapLocation findNearestEmptyTile(MapLocation center, MapInfo[] nearbyTiles) {
+    private MapLocation findNearestEnemyPaint() {
         MapLocation me = rc.getLocation();
         MapLocation best = null;
-        int bestDist = Integer.MAX_VALUE;
-
+        int bestDistance = Integer.MAX_VALUE;
         for (MapInfo tile : nearbyTiles) {
-            MapLocation loc = tile.getMapLocation();
-            if (loc.distanceSquaredTo(center) > 8 || tile.isWall() || tile.hasRuin()) {
-                continue;
-            }
-
-            PaintType paint = tile.getPaint();
-            if (paint == PaintType.ALLY_PRIMARY || paint == PaintType.ALLY_SECONDARY) {
-                continue; 
-            }
-
-            int dist = me.distanceSquaredTo(loc);
-            if (dist < bestDist) {
-                bestDist = dist;
-                best = loc;
+            if (!tile.getPaint().isEnemy()) continue;
+            int distance = me.distanceSquaredTo(tile.getMapLocation());
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = tile.getMapLocation();
             }
         }
-
         return best;
     }
 
-    private MapLocation findNearestUnpaintedResourceTile(MapLocation center, MapInfo[] nearbyTiles) {
-        MapLocation me = rc.getLocation();
-        MapLocation best = null;
-        int bestDist = Integer.MAX_VALUE;
+    private boolean stepToward(MapLocation target) throws GameActionException {
+        if (target == null || !rc.isMovementReady()) return false;
+        Direction direct = rc.getLocation().directionTo(target);
+        Direction[] options = {
+            direct, direct.rotateLeft(), direct.rotateRight(),
+            direct.rotateLeft().rotateLeft(), direct.rotateRight().rotateRight(), direct.opposite()
+        };
+        for (Direction option : options) if (tryMove(option)) return true;
+        return false;
+    }
 
-        for (MapInfo tile : nearbyTiles) {
-            MapLocation loc = tile.getMapLocation();
-            if (loc.distanceSquaredTo(center) > 4 || tile.isWall() || tile.hasRuin()) {
-                continue;
-            }
-
-            PaintType mark = tile.getMark();
-            if (mark != PaintType.ALLY_PRIMARY && mark != PaintType.ALLY_SECONDARY) {
-                continue;
-            }
-
-            PaintType paint = tile.getPaint();
-            boolean paintedCorrectly
-                    = (mark == PaintType.ALLY_PRIMARY && paint == PaintType.ALLY_PRIMARY)
-                    || (mark == PaintType.ALLY_SECONDARY && paint == PaintType.ALLY_SECONDARY);
-            if (paintedCorrectly) {
-                continue;
-            }
-
-            int dist = me.distanceSquaredTo(loc);
-            if (dist < bestDist) {
-                bestDist = dist;
-                best = loc;
-            }
+    private boolean moveInRoamDirection() throws GameActionException {
+        if (!rc.isMovementReady()) return false;
+        if (tryMove(roamDirection)) return true;
+        Direction left = roamDirection;
+        Direction right = roamDirection;
+        for (int i = 0; i < 3; i++) {
+            left = left.rotateLeft();
+            if (tryMove(left)) return true;
+            right = right.rotateRight();
+            if (tryMove(right)) return true;
         }
+        roamDirection = Direction.values()[rng.nextInt(8)];
+        if (roamDirection == Direction.CENTER) roamDirection = Direction.NORTH;
+        return false;
+    }
 
-        return best;
+    private boolean tryMove(Direction direction) throws GameActionException {
+        if (direction == null || direction == Direction.CENTER || !rc.canMove(direction)) return false;
+        rc.move(direction);
+        roamDirection = direction;
+        return true;
+    }
+
+    private boolean tryPaintTile(MapLocation tile) throws GameActionException {
+        if (tile == null || !rc.canAttack(tile)) return false;
+        PaintType mark = rc.senseMapInfo(tile).getMark();
+        if (mark == PaintType.ALLY_PRIMARY || mark == PaintType.ALLY_SECONDARY) rc.attack(tile, mark == PaintType.ALLY_SECONDARY);
+        else rc.attack(tile);
+        return true;
     }
 
     private UnitType findCompletableTowerType(MapLocation center) throws GameActionException {
-        if (rc.canCompleteTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, center)) {
-            return UnitType.LEVEL_ONE_PAINT_TOWER;
-        } else if (rc.canCompleteTowerPattern(UnitType.LEVEL_ONE_MONEY_TOWER, center)) {
-            return UnitType.LEVEL_ONE_MONEY_TOWER;
-        } else if (rc.canCompleteTowerPattern(UnitType.LEVEL_ONE_DEFENSE_TOWER, center)) {
-            return UnitType.LEVEL_ONE_DEFENSE_TOWER;
-        }
+        if (rc.canCompleteTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, center)) return UnitType.LEVEL_ONE_PAINT_TOWER;
+        if (rc.canCompleteTowerPattern(UnitType.LEVEL_ONE_MONEY_TOWER, center)) return UnitType.LEVEL_ONE_MONEY_TOWER;
+        if (rc.canCompleteTowerPattern(UnitType.LEVEL_ONE_DEFENSE_TOWER, center)) return UnitType.LEVEL_ONE_DEFENSE_TOWER;
         return null;
     }
 
-    private boolean hasAllyPatternMark(MapLocation center) throws GameActionException {
+    private boolean hasAllyPatternMark(MapLocation center, int maxDistanceSquared) throws GameActionException {
         for (MapInfo tile : rc.senseNearbyMapInfos(center, 8)) {
+            if (tile.getMapLocation().distanceSquaredTo(center) > maxDistanceSquared) continue;
             PaintType mark = tile.getMark();
-            if (mark == PaintType.ALLY_PRIMARY || mark == PaintType.ALLY_SECONDARY) {
-                return true;
-            }
+            if (mark == PaintType.ALLY_PRIMARY || mark == PaintType.ALLY_SECONDARY) return true;
         }
         return false;
     }
 
-    private boolean isRuinUnclaimed(MapLocation ruin) {
-        for (RobotInfo robot : nearbyRobots) {
-            if (!robot.location.equals(ruin)) {
-                continue;
-            }
-            if (isTowerType(robot.type)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private boolean isValidSrpCenter(MapLocation center) throws GameActionException {
+    private boolean isValidSrpCenter(MapLocation center) {
         return center.x % 4 == 2 && center.y % 4 == 2 && !hasRuinWithin3(center);
     }
 
     private boolean shouldMarkResourcePattern(MapLocation center) throws GameActionException {
-        if (center == null || !rc.canMarkResourcePattern(center)) {
-            return false;
-        }
-
+        if (!rc.canMarkResourcePattern(center)) return false;
         for (int dx = -2; dx <= 2; dx++) {
             for (int dy = -2; dy <= 2; dy++) {
                 MapLocation loc = center.translate(dx, dy);
-                if (!rc.canSenseLocation(loc)) {
-                    return false;
-                }
-
+                if (!rc.canSenseLocation(loc)) return false;
                 MapInfo tile = rc.senseMapInfo(loc);
                 if (tile.hasRuin() || tile.isWall() || tile.getMark() != PaintType.EMPTY || !tile.getPaint().isAlly()) {
                     return false;
@@ -978,81 +502,11 @@ public class Soldier extends Unit {
     }
 
     private boolean hasIncompleteResourcePattern(MapLocation center) throws GameActionException {
-        return findIncompleteResourcePatternTile(center, rc.senseNearbyMapInfos(center, 8)) != null;
+        return findMarkedMismatch(center, 4) != null;
     }
 
-    private MapLocation findIncompleteResourcePatternTile(MapLocation center, MapInfo[] nearbyTiles) {
-        for (MapInfo tile : nearbyTiles) {
-            MapLocation loc = tile.getMapLocation();
-            if (loc.distanceSquaredTo(center) > 4 || tile.isWall() || tile.hasRuin()) {
-                continue;
-            }
-
-            PaintType mark = tile.getMark();
-            if (mark != PaintType.ALLY_PRIMARY && mark != PaintType.ALLY_SECONDARY) {
-                continue;
-            }
-
-            PaintType paint = tile.getPaint();
-            boolean paintedCorrectly
-                    = (mark == PaintType.ALLY_PRIMARY && paint == PaintType.ALLY_PRIMARY)
-                    || (mark == PaintType.ALLY_SECONDARY && paint == PaintType.ALLY_SECONDARY);
-            if (!paintedCorrectly) {
-                return loc;
-            }
-        }
-        return null;
-    }
-
-    private boolean hasRuinWithin3(MapLocation center) throws GameActionException {
-        for (MapInfo info : rc.senseNearbyMapInfos()) {
-            if (info.hasRuin() && center.distanceSquaredTo(info.getMapLocation()) <= 3) {
-                return true;
-            }
-        }
+    private boolean hasRuinWithin3(MapLocation center) {
+        for (MapInfo tile : nearbyTiles) if (tile.hasRuin() && center.distanceSquaredTo(tile.getMapLocation()) <= 3) return true;
         return false;
-    }
-
-    private int countKnownPaintTowers() {
-        int count = 0;
-        for (int i = 0; i < mapData.towerCount; i++) {
-            UnitType type = UnitType.values()[mapData.towerTypes[i]];
-            if (isPaintTower(type)) {
-                count += 1;
-            }
-        }
-        return count;
-    }
-
-    private static final class PatternPlan {
-
-        private final MapLocation location;
-        private final UnitType towerType;
-
-        private PatternPlan(MapLocation location, UnitType towerType) {
-            this.location = location;
-            this.towerType = towerType;
-        }
-    }
-
-    private static final class Objective {
-
-        private final MapLocation location;
-        private final boolean isResource;
-        private final UnitType towerType;
-
-        private Objective(MapLocation location, boolean isResource, UnitType towerType) {
-            this.location = location;
-            this.isResource = isResource;
-            this.towerType = towerType;
-        }
-
-        private static Objective tower(MapLocation location, UnitType towerType) {
-            return new Objective(location, false, towerType);
-        }
-
-        private static Objective resource(MapLocation location) {
-            return new Objective(location, true, null);
-        }
     }
 }

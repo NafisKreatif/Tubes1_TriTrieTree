@@ -19,6 +19,7 @@ public class Splasher extends Unit {
     private Direction moveDirection;
 
     private MapLocation nearestEnemyPaint;
+    private MapLocation ruinEnemyPaint;
     private AttackChoice bestSplashChoice;
     private boolean splashActionReadyBranch;
 
@@ -36,7 +37,10 @@ public class Splasher extends Unit {
         RobotInfo[] nearbyRobots = rc.senseNearbyRobots();
         mapData.update(rc, nearbyRobots);
 
-        nearestEnemyPaint = findNearestEnemyPaint(rc.senseNearbyMapInfos());
+        MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
+        updateVisibleRuinTaint(nearbyTiles);
+        ruinEnemyPaint = findNearestRuinEnemyPaint(nearbyTiles);
+        nearestEnemyPaint = ruinEnemyPaint != null ? ruinEnemyPaint : findNearestEnemyPaint(nearbyTiles);
         bestSplashChoice = null;
         splashActionReadyBranch = false;
 
@@ -50,6 +54,9 @@ public class Splasher extends Unit {
             splashActionReadyBranch = true;
             MapInfo[] splashTiles = rc.senseNearbyMapInfos(18);
             bestSplashChoice = findBestSplashAttack(splashTiles);
+            if (nearestEnemyPaint == null) {
+                nearestEnemyPaint = findNearestRuinEnemyPaint(splashTiles);
+            }
             if (nearestEnemyPaint == null) {
                 nearestEnemyPaint = findNearestEnemyPaint(splashTiles);
             }
@@ -198,6 +205,9 @@ public class Splasher extends Unit {
             }
 
             int score = countEnemyPaintIn3(attackLoc);
+            if (isNearKnownRuin(attackLoc)) {
+                score += 2;
+            }
             if (best == null || score > best.score) {
                 best = new AttackChoice(attackLoc, score);
             }
@@ -225,6 +235,63 @@ public class Splasher extends Unit {
 
     private boolean isEnemyPaint(MapLocation loc) throws GameActionException {
         return rc.canSenseLocation(loc) && rc.senseMapInfo(loc).getPaint().isEnemy();
+    }
+
+    private void updateVisibleRuinTaint(MapInfo[] nearbyTiles) throws GameActionException {
+        for (MapInfo tile : nearbyTiles) {
+            if (!tile.hasRuin()) {
+                continue;
+            }
+
+            MapLocation ruin = tile.getMapLocation();
+            if (rc.canSenseRobotAtLocation(ruin)) {
+                RobotInfo robot = rc.senseRobotAtLocation(ruin);
+                if (robot != null && robot.type.isTowerType()) {
+                    mapData.markRuin(ruin, robot.team == rc.getTeam() ? MapData.RUIN_ALLY_OWNED : MapData.RUIN_ENEMY_OWNED);
+                    continue;
+                }
+            }
+
+            mapData.markRuin(ruin, hasEnemyPaintNearRuin(ruin) ? MapData.RUIN_TAINTED : MapData.RUIN_UNCLAIMED);
+        }
+    }
+
+    private boolean hasEnemyPaintNearRuin(MapLocation ruin) throws GameActionException {
+        for (MapInfo tile : rc.senseNearbyMapInfos(ruin, 8)) {
+            if (!tile.getMapLocation().equals(ruin) && tile.getPaint().isEnemy()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private MapLocation findNearestRuinEnemyPaint(MapInfo[] nearbyTiles) {
+        MapLocation me = rc.getLocation();
+        MapLocation best = null;
+        int bestDistance = Integer.MAX_VALUE;
+
+        for (MapInfo tile : nearbyTiles) {
+            if (!tile.getPaint().isEnemy() || !isNearKnownRuin(tile.getMapLocation())) {
+                continue;
+            }
+
+            int distance = me.distanceSquaredTo(tile.getMapLocation());
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = tile.getMapLocation();
+            }
+        }
+
+        return best;
+    }
+
+    private boolean isNearKnownRuin(MapLocation loc) {
+        for (int i = 0; i < mapData.ruinCount; i++) {
+            if (loc.distanceSquaredTo(mapData.knownRuins[i]) <= 8) {
+                return true;
+            }
+        }
+        return false;
     }
 
 
