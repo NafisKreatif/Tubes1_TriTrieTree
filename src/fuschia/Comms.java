@@ -1,6 +1,11 @@
 package fuschia;
 
+import battlecode.common.GameActionException;
 import battlecode.common.MapLocation;
+import battlecode.common.Message;
+import battlecode.common.RobotController;
+import battlecode.common.RobotInfo;
+import battlecode.common.UnitType;
 
 // Communication
 public final class Comms {
@@ -49,6 +54,53 @@ public final class Comms {
         }
     }
 
+    public static void readAndApply(RobotController rc, MapData mapData) throws GameActionException {
+        Message[] messages = rc.readMessages(-1);
+        for (Message msg : messages) {
+            DecodedMessage decoded = decodeMessage(msg.getBytes());
+            if (decoded.type != MessageType.TOWER_LOCATION) {
+                continue;
+            }
+
+            UnitType towerType = decodeTowerType(decoded.towerType);
+            mapData.upsertTower(decoded.location, towerType);
+        }
+    }
+
+    public static void broadcastTowerIntel(RobotController rc, MapData mapData) throws GameActionException {
+        MapLocation towerLocation = null;
+        int towerTypeCode = 0;
+        UnitType selfType = rc.getType();
+        if (isTowerType(selfType)) {
+            towerLocation = rc.getLocation();
+            towerTypeCode = encodeTowerType(selfType);
+        } else {
+            MapLocation nearest = mapData.getNearestTower(rc.getLocation());
+            if (nearest != null) {
+                int idx = findTowerIndex(mapData, nearest);
+                if (idx != -1) {
+                    towerLocation = nearest;
+                    towerTypeCode = encodeTowerType(UnitType.values()[mapData.towerTypes[idx]]);
+                }
+            }
+        }
+
+        if (towerLocation == null) {
+            return;
+        }
+
+        int payload = encodeMessage(MessageType.TOWER_LOCATION, towerLocation, towerTypeCode);
+        RobotInfo[] allies = rc.senseNearbyRobots(-1, rc.getTeam());
+        for (RobotInfo ally : allies) {
+            if (ally.location.equals(rc.getLocation())) {
+                continue;
+            }
+            if (rc.canSendMessage(ally.location, payload)) {
+                rc.sendMessage(ally.location, payload);
+            }
+        }
+    }
+
     public static int encodeMessage(MessageType type, MapLocation loc, int towerType) {
         int message = 0;
         message |= (type.value() & TYPE_MASK);
@@ -64,5 +116,50 @@ public final class Comms {
         int y = (message >>> 9) & COORD_MASK;
         int towerType = (message >>> 15) & TOWER_TYPE_MASK;
         return new DecodedMessage(MessageType.fromValue(typeValue), new MapLocation(x, y), towerType);
+    }
+
+    private static int findTowerIndex(MapData mapData, MapLocation loc) {
+        for (int i = 0; i < mapData.towerCount; i++) {
+            if (mapData.knownTowers[i].equals(loc)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int encodeTowerType(UnitType towerType) {
+        if (towerType == UnitType.LEVEL_ONE_MONEY_TOWER
+            || towerType == UnitType.LEVEL_TWO_MONEY_TOWER
+            || towerType == UnitType.LEVEL_THREE_MONEY_TOWER) {
+            return 1;
+        }
+        if (towerType == UnitType.LEVEL_ONE_DEFENSE_TOWER
+            || towerType == UnitType.LEVEL_TWO_DEFENSE_TOWER
+            || towerType == UnitType.LEVEL_THREE_DEFENSE_TOWER) {
+            return 2;
+        }
+        return 0;
+    }
+
+    private static UnitType decodeTowerType(int encodedType) {
+        if (encodedType == 1) {
+            return UnitType.LEVEL_ONE_MONEY_TOWER;
+        }
+        if (encodedType == 2) {
+            return UnitType.LEVEL_ONE_DEFENSE_TOWER;
+        }
+        return UnitType.LEVEL_ONE_PAINT_TOWER;
+    }
+
+    private static boolean isTowerType(UnitType type) {
+        return type == UnitType.LEVEL_ONE_PAINT_TOWER
+            || type == UnitType.LEVEL_TWO_PAINT_TOWER
+            || type == UnitType.LEVEL_THREE_PAINT_TOWER
+            || type == UnitType.LEVEL_ONE_MONEY_TOWER
+            || type == UnitType.LEVEL_TWO_MONEY_TOWER
+            || type == UnitType.LEVEL_THREE_MONEY_TOWER
+            || type == UnitType.LEVEL_ONE_DEFENSE_TOWER
+            || type == UnitType.LEVEL_TWO_DEFENSE_TOWER
+            || type == UnitType.LEVEL_THREE_DEFENSE_TOWER;
     }
 }

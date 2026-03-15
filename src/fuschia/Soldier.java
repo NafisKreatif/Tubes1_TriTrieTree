@@ -207,6 +207,13 @@ public class Soldier extends Unit {
             return false;
         }
 
+        if (rc.getPaint() < 40) {
+            refillMode = true;
+            returnMode = false;
+            returnIndex = moveHistory.size() - 1;
+            return false;
+        }
+
         state = objectiveFromFreshMark ? SoldierState.TAINT : SoldierState.TOWER_BUILD;
         MapLocation objectiveCenter = objective.location;
         boolean productive = false;

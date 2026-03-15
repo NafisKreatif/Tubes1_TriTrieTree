@@ -26,6 +26,7 @@ public class Mopper extends Unit {
 
     @Override
     protected void executeState() throws GameActionException {
+        rc.setIndicatorString(state.toString());
         switch (state) {
             case REFILL:
                 doRefill();
