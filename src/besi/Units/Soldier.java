@@ -5,7 +5,7 @@ import battlecode.common.*;
 
 /**
  * Soldier: unit painter utama + penyerang tower musuh.
- * States: CONNECTING_TO_TOWER → REFILLING → COMBAT → BUILD → EXPLORE
+ * States: REFILLING → COMBAT → BUILD → EXPLORE
  * Pola turn: senseNearby() → determineState() → execute state → stateInvariantActions()
  */
 public class Soldier extends Unit {
@@ -17,7 +17,7 @@ public class Soldier extends Unit {
         super(rc);
         state = UnitState.EXPLORE;
 
-        // Arah eksplorasi awal: ikuti arah dari spawn tower ke posisi kita
+        // Arah eksplorasi awal: ikuti arah dari spawn tower ke posisi kita menjauh
         Direction dir = (spawnTowerLoc != null)
             ? spawnTowerLoc.directionTo(rc.getLocation())
             : randomDirection();
@@ -34,7 +34,6 @@ public class Soldier extends Unit {
         state     = determineState();
 
         switch (state) {
-            case CONNECTING_TO_TOWER -> connectingState();
             case REFILLING           -> refillingState();
             case COMBAT              -> combatState();
             case BUILD               -> buildState();
@@ -47,11 +46,6 @@ public class Soldier extends Unit {
     //  State machine
 
     private UnitState determineState() throws GameActionException {
-        // Connecting: awal spawn, perlu connect ke tower via paint untuk terima info
-        if (!connected && spawnTowerLoc != null && rc.getRoundNum() - spawnTurn < 10) {
-            return UnitState.CONNECTING_TO_TOWER;
-        }
-
         // Refilling
         if (prevState != UnitState.REFILLING && shouldRefill()) {
             if (prevState != UnitState.EXPLORE) returnLoc = rc.getLocation();
@@ -78,17 +72,6 @@ public class Soldier extends Unit {
     }
 
     //  State implementations
-
-    // Bergerak sampai bisa connect ke spawn tower via paint 
-    private void connectingState() throws GameActionException {
-        if (spawnTowerLoc == null || connected) return;
-        // Cat tile di bawah diri sendiri
-        tryPaintUnderSelf();
-        // Gerak mendekati tower
-        if (distTo(spawnTowerLoc) > 2) {
-            bugNav(spawnTowerLoc);
-        }
-    }
 
     // Kembali ke paint tower untuk isi ulang paint
     private void refillingState() throws GameActionException {

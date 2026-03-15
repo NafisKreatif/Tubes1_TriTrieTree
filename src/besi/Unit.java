@@ -387,7 +387,7 @@ public abstract class Unit extends Robot {
         fuzzyMove(dir);
     }
 
-    // Coba gerak masuk ke dalam radius tertentu dari target.
+    //Coba gerak masuk ke dalam radius tertentu dari target.
     protected void moveIntoRange(MapLocation target, int radiusSq) throws GameActionException {
         if (!rc.isMovementReady()) return;
         if (distTo(target) <= radiusSq) return;
