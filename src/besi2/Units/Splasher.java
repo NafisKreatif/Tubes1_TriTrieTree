@@ -1,8 +1,7 @@
 package besi2.Units;
 
-import besi2.Unit;
-
 import battlecode.common.*;
+import besi2.Unit;
 
 /**
  * Splasher: AoE painter
@@ -97,7 +96,11 @@ public class Splasher extends Unit {
                 int ox = loc.x - rc.getLocation().x + 5;
                 int oy = loc.y - rc.getLocation().y + 5;
                 if (ox < 0 || ox >= 11 || oy < 0 || oy >= 11) continue;
-                if (score[ox][oy] > maxScore) { maxScore = score[ox][oy]; bestSplash = loc; }
+                
+                if (score[ox][oy] > maxScore && isSafeToSplash(loc)) { 
+                    maxScore = score[ox][oy]; 
+                    bestSplash = loc; 
+                }
             }
 
             // Splash jika skor cukup atau semua enemy tiles bisa dicover

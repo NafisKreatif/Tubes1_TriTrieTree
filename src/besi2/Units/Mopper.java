@@ -1,8 +1,7 @@
 package besi2.Units;
 
-import besi2.Unit;
-// import besi2.Unit.UnitState;
 import battlecode.common.*;
+import besi2.Unit;
 
 /**
  * Mopper: bersihkan cat musuh + refill paint allied robots

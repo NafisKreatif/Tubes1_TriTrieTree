@@ -1,7 +1,6 @@
 package besi2;
 
 import battlecode.common.*;
-
 import java.util.*;
 
 /**
@@ -43,10 +42,6 @@ abstract public class Robot {
     public Random rng;
     public boolean RIGHT;
 
-    public static boolean[][] blueprintPaint;
-    public static boolean[][] blueprintMoney;
-    public static boolean[][] blueprintDefense;
-
     // Constructor
     public Robot(RobotController rc) throws GameActionException {
         this.rc = rc;
@@ -56,12 +51,6 @@ abstract public class Robot {
         this.spawnTurn = rc.getRoundNum();
         this.rng = new Random(rc.getID());
         this.RIGHT = rc.getID()%2 == 0;
-
-        if (blueprintPaint == null) {
-            blueprintPaint = rc.getTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER);
-            blueprintMoney = rc.getTowerPattern(UnitType.LEVEL_ONE_MONEY_TOWER);
-            blueprintDefense = rc.getTowerPattern(UnitType.LEVEL_ONE_DEFENSE_TOWER);
-        }
 
         // Soldier muncul langsung cat
         if (rc.getType() == UnitType.SOLDIER
@@ -227,13 +216,5 @@ abstract public class Robot {
         return t == UnitType.LEVEL_ONE_DEFENSE_TOWER
             || t == UnitType.LEVEL_TWO_DEFENSE_TOWER
             || t == UnitType.LEVEL_THREE_DEFENSE_TOWER;
-    }
-
-    public int encodeLocation(MapLocation loc) {
-        return loc.x | (loc.y << 8);
-    }
-
-    public MapLocation decodeLocation(int encoded) {
-        return new MapLocation(encoded & 0xFF, (encoded >> 8) & 0xFF);
     }
 }
