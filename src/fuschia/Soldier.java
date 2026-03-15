@@ -172,9 +172,7 @@ public class Soldier extends Unit {
     private void selectObjective() throws GameActionException {
         MapLocation incompleteTower = findIncompleteAllyPatternCenter();
         if (incompleteTower != null) {
-            UnitType towerType = countKnownPaintTowers() == 0
-                ? UnitType.LEVEL_ONE_PAINT_TOWER
-                : UnitType.LEVEL_ONE_MONEY_TOWER;
+            UnitType towerType = findPatternTowerType(incompleteTower);
             objective = Objective.tower(incompleteTower, towerType);
             objectiveFromFreshMark = false;
             return;
@@ -397,7 +395,14 @@ public class Soldier extends Unit {
         if (countKnownPaintTowers() == 0) {
             return UnitType.LEVEL_ONE_PAINT_TOWER;
         }
-        return rng.nextInt(2) == 0 ? UnitType.LEVEL_ONE_PAINT_TOWER : UnitType.LEVEL_ONE_MONEY_TOWER;
+        int choice = rng.nextInt(4);
+        if (choice == 0) {
+            return UnitType.LEVEL_ONE_DEFENSE_TOWER;
+        } else if (choice == 1) {
+            return UnitType.LEVEL_ONE_MONEY_TOWER;
+        } else {
+            return UnitType.LEVEL_ONE_PAINT_TOWER;
+        }
     }
 
     private UnitType findPatternTowerType(MapLocation center) throws GameActionException {

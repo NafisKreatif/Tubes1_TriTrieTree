@@ -91,8 +91,11 @@ public final class Comms {
 
         int payload = encodeMessage(MessageType.TOWER_LOCATION, towerLocation, towerTypeCode);
         RobotInfo[] allies = rc.senseNearbyRobots(-1, rc.getTeam());
+        if (allies == null) {
+            return;
+        }
         for (RobotInfo ally : allies) {
-            if (ally.location.equals(rc.getLocation())) {
+            if (ally == null || ally.location == null || ally.location.equals(rc.getLocation())) {
                 continue;
             }
             if (rc.canSendMessage(ally.location, payload)) {
